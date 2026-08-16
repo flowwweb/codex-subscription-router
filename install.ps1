@@ -128,54 +128,52 @@ function Resolve-CodexBackend {
     Fail "could not find a runnable Windows Codex backend; pass -CodexExecutable C:\path\to\codex.exe"
 }
 
-function Invoke-Icacls([string[]] $Arguments) {
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = "Continue"
-        $output = @(& icacls.exe @Arguments 2>&1)
-        [ordered]@{
-            exitCode = $LASTEXITCODE
-            output = $output
-        }
-    } finally {
-        $ErrorActionPreference = $previousErrorActionPreference
+function Set-PrivateAclEntry([string] $Path, [bool] $IsDirectory) {
+    $current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $system = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
+    $item = if ($IsDirectory) {
+        New-Object System.IO.DirectoryInfo($Path)
+    } else {
+        New-Object System.IO.FileInfo($Path)
+    }
+    $acl = $item.GetAccessControl()
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($identity in @($acl.Access | ForEach-Object IdentityReference | Select-Object -Unique)) {
+        $acl.PurgeAccessRules($identity)
+    }
+    $inheritance = [System.Security.AccessControl.InheritanceFlags]::None
+    if ($IsDirectory) {
+        $inheritance = [System.Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit"
+    }
+    foreach ($sid in @($current, $system)) {
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $sid,
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritance,
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        )
+        [void]$acl.AddAccessRule($rule)
+    }
+    $acl.SetOwner($current)
+    $item.SetAccessControl($acl)
+
+    $verified = $item.GetAccessControl()
+    $allowed = @($current.Value, $system.Value)
+    $unexpected = @($verified.Access | Where-Object {
+        $sid = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+        $sid -notin $allowed -or $_.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow
+    })
+    if (-not $verified.AreAccessRulesProtected -or $unexpected.Count -gt 0) {
+        Fail "effective ACL verification failed: $Path"
     }
 }
 
 function Set-PrivateStateAcl([string] $Path) {
-    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $rootResult = Invoke-Icacls @(
-        $Path,
-        "/inheritance:r",
-        "/grant:r",
-        "${identity}:(OI)(CI)F",
-        "/T",
-        "/C"
-    )
-    if ($rootResult.exitCode -ne 0) {
-        $unexpectedErrors = @($rootResult.output | ForEach-Object { [string]$_ } | Where-Object {
-            $_ -match "(?i)(access is denied|cannot open|invalid parameter|not enough|error)" -and
-            $_ -notmatch "(?i)system cannot find the path specified"
-        })
-        if ($unexpectedErrors.Count -gt 0) {
-            Fail "could not restrict router state permissions with icacls (exit $($rootResult.exitCode)): $($unexpectedErrors -join '; ')"
-        }
-    }
-    $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue)
-    foreach ($file in $files) {
-        $filePath = $file.FullName
-        if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
-            continue
-        }
-        $exitCode = Invoke-Icacls @(
-            $filePath,
-            "/inheritance:r",
-            "/grant:r",
-            "${identity}:F",
-            "/C"
-        )
-        if ($exitCode.exitCode -ne 0 -and (Test-Path -LiteralPath $filePath -PathType Leaf)) {
-            Fail "could not restrict router file permissions with icacls (exit $($exitCode.exitCode)): $filePath"
+    Set-PrivateAclEntry -Path $Path -IsDirectory $true
+    foreach ($item in @(Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue)) {
+        if (Test-Path -LiteralPath $item.FullName) {
+            Set-PrivateAclEntry -Path $item.FullName -IsDirectory $item.PSIsContainer
         }
     }
 }
