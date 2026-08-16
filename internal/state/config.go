@@ -23,6 +23,9 @@ func syncIsolatedConfig(primaryCodexHome, isolatedCodexHome string) error {
 	if err := os.Chmod(isolatedCodexHome, 0o700); err != nil {
 		return fmt.Errorf("secure isolated Codex home: %w", err)
 	}
+	if err := SecureDirectory(isolatedCodexHome); err != nil {
+		return fmt.Errorf("secure isolated Codex home ACL: %w", err)
+	}
 
 	primaryConfig, err := readConfig(filepath.Join(primaryCodexHome, "config.toml"))
 	if err != nil {
@@ -54,6 +57,9 @@ func syncIsolatedConfig(primaryCodexHome, isolatedCodexHome string) error {
 	}
 	if err := os.Chmod(temporaryPath, 0o600); err != nil {
 		return fmt.Errorf("secure temporary config: %w", err)
+	}
+	if err := SecureFile(temporaryPath); err != nil {
+		return fmt.Errorf("secure temporary config ACL: %w", err)
 	}
 	if err := os.Rename(temporaryPath, configPath); err != nil {
 		return fmt.Errorf("commit config: %w", err)

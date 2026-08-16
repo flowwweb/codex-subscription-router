@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -139,6 +140,9 @@ func (c *Child) Request(ctx context.Context, method string, params json.RawMessa
 func (c *Child) Close() error {
 	if c.command.Process == nil {
 		return nil
+	}
+	if runtime.GOOS == "windows" {
+		return c.command.Process.Kill()
 	}
 	return c.command.Process.Signal(os.Interrupt)
 }

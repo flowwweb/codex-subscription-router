@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -125,17 +126,30 @@ func run() error {
 
 func resolveRealExecutable() (string, error) {
 	if configured := os.Getenv("CODEX_MUX_REAL_CODEX"); configured != "" {
+		info, err := os.Stat(configured)
+		if err != nil {
+			return "", fmt.Errorf("find configured real Codex executable: %w", err)
+		}
+		if info.IsDir() {
+			return "", fmt.Errorf("configured real Codex executable is a directory: %s", configured)
+		}
 		return configured, nil
 	}
 	executable, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("resolve wrapper executable: %w", err)
 	}
-	realExecutable := filepath.Join(filepath.Dir(executable), "codex.real")
-	if _, err := os.Stat(realExecutable); err != nil {
-		return "", fmt.Errorf("find bundled codex.real: %w", err)
+	base := filepath.Join(filepath.Dir(executable), "codex.real")
+	candidates := []string{base}
+	if runtime.GOOS == "windows" {
+		candidates = []string{base + ".exe", base}
 	}
-	return realExecutable, nil
+	for _, candidate := range candidates {
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("find bundled real Codex executable beside %s", executable)
 }
 
 func isInteractiveAppServer(args []string) bool {
@@ -175,6 +189,13 @@ func loadOrCreateToken(root string) (string, error) {
 		return validateControlToken(configured)
 	}
 	path := filepath.Join(root, "control-token")
+	if _, statErr := os.Stat(path); statErr == nil {
+		if aclErr := state.SecureFile(path); aclErr != nil {
+			return "", fmt.Errorf("secure existing control token ACL: %w", aclErr)
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return "", fmt.Errorf("inspect control token: %w", statErr)
+	}
 	if data, err := os.ReadFile(path); err == nil {
 		token, validateErr := validateControlToken(string(data))
 		if validateErr != nil {
@@ -182,6 +203,9 @@ func loadOrCreateToken(root string) (string, error) {
 		}
 		if chmodErr := os.Chmod(path, 0o600); chmodErr != nil {
 			return "", fmt.Errorf("secure control token: %w", chmodErr)
+		}
+		if aclErr := state.SecureFile(path); aclErr != nil {
+			return "", fmt.Errorf("secure control token ACL: %w", aclErr)
 		}
 		return token, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -194,6 +218,9 @@ func loadOrCreateToken(root string) (string, error) {
 	token := hex.EncodeToString(bytes)
 	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
 		return "", fmt.Errorf("write control token: %w", err)
+	}
+	if err := state.SecureFile(path); err != nil {
+		return "", fmt.Errorf("secure control token ACL: %w", err)
 	}
 	return token, nil
 }

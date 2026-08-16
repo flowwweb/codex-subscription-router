@@ -52,12 +52,31 @@ func Open(root, primaryCodexHome string) (*Store, error) {
 	if err := os.Chmod(root, 0o700); err != nil {
 		return nil, fmt.Errorf("secure state root: %w", err)
 	}
+	if err := SecureDirectory(root); err != nil {
+		return nil, fmt.Errorf("secure state root ACL: %w", err)
+	}
+	if err := os.MkdirAll(primaryCodexHome, 0o700); err != nil {
+		return nil, fmt.Errorf("create primary Codex home: %w", err)
+	}
+	if err := os.Chmod(primaryCodexHome, 0o700); err != nil {
+		return nil, fmt.Errorf("secure primary Codex home: %w", err)
+	}
+	if err := SecureDirectory(primaryCodexHome); err != nil {
+		return nil, fmt.Errorf("secure primary Codex home ACL: %w", err)
+	}
 
 	store := &Store{
 		root:             root,
 		path:             filepath.Join(root, "state.json"),
 		primaryCodexHome: primaryCodexHome,
 		owners:           make(map[string]string),
+	}
+	if _, statErr := os.Stat(store.path); statErr == nil {
+		if err := SecureFile(store.path); err != nil {
+			return nil, fmt.Errorf("secure existing state ACL: %w", err)
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect state: %w", statErr)
 	}
 	data, err := os.ReadFile(store.path)
 	switch {
@@ -263,6 +282,9 @@ func (s *Store) saveLocked() error {
 	}
 	if err := os.Chmod(temporary, 0o600); err != nil {
 		return fmt.Errorf("secure state: %w", err)
+	}
+	if err := SecureFile(temporary); err != nil {
+		return fmt.Errorf("secure state ACL: %w", err)
 	}
 	if err := os.Rename(temporary, s.path); err != nil {
 		return fmt.Errorf("commit state: %w", err)

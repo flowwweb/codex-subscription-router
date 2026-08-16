@@ -2,13 +2,24 @@
 
 ## Development setup
 
-Use macOS on Apple silicon with Go 1.26+, Node.js 22.12+, npm, Xcode Command Line
-Tools, and an official ChatGPT installation.
+For the macOS patcher, use macOS on Apple silicon with Go 1.26+, Node.js
+22.12+, npm, Xcode Command Line Tools, and an official ChatGPT installation.
+For the Windows adapter, use Windows x64 with Go 1.26+, PowerShell, and the
+official Windows Codex package.
 
 ```sh
 npm ci --ignore-scripts
 npm run check
 npm run release:check
+```
+
+On Windows, also run:
+
+```powershell
+go test ./...
+go vet ./...
+npm run check:windows
+python scripts/check_release.py
 ```
 
 Do not commit an app bundle, credentials, signing certificates, provisioning

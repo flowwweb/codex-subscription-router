@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -22,6 +23,11 @@ REQUIRED_FILES = (
     "SECURITY.md",
     "VERSION",
     "install.sh",
+    "install.ps1",
+    "scripts/check_windows.ps1",
+    "scripts/windows/launch-router.ps1",
+    "scripts/windows/launch-router.cmd",
+    "scripts/run_python.mjs",
     "docs/ARCHITECTURE.md",
     "docs/COMPATIBILITY.md",
     "docs/E2E-REPORT-0.1.0.md",
@@ -53,7 +59,7 @@ FORBIDDEN_TRACKED_SUFFIXES = {
     ".zip",
 }
 FORBIDDEN_TRACKED_NAMES = {".env", "auth.json", "control-token", "state.json"}
-TEXT_SUFFIXES = {"", ".c", ".go", ".json", ".js", ".cjs", ".md", ".py", ".toml", ".yml", ".yaml"}
+TEXT_SUFFIXES = {"", ".c", ".go", ".json", ".js", ".cjs", ".cmd", ".md", ".py", ".ps1", ".toml", ".yml", ".yaml"}
 MACOS_USER_PREFIX = "/" + "Users" + "/"
 
 
@@ -86,7 +92,7 @@ def main() -> int:
         fail("package-lock.json does not match the declared @electron/asar version")
     if package.get("license") != "MIT":
         fail("package.json license does not match LICENSE")
-    if not ((ROOT / "install.sh").stat().st_mode & 0o111):
+    if os.name != "nt" and not ((ROOT / "install.sh").stat().st_mode & 0o111):
         fail("install.sh is not executable")
 
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")

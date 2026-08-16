@@ -18,3 +18,23 @@ it is unverified. The patcher rejects a version, build, or ASAR hash mismatch by
 default; `--allow-untested-source` is an explicit diagnostic override. Never
 weaken an anchor-count or binary-constant check merely to make a new build
 complete. Review the upstream change and update the patch deliberately.
+
+## Windows adapter observation
+
+The Windows adapter was exercised against the locally installed package with:
+
+| Component | Observed value |
+| --- | --- |
+| Platform | Windows x64 |
+| Official package | `OpenAI.Codex` |
+| Official app version | `26.810.52044` |
+| Official bundle build | `6662` |
+| `app.asar` SHA-256 | `c7ac6d76cf5f30aa5cb92e1e46561933c06e94e3fe2d6582a04dac18c76f3ed1` |
+| Official package CLI asset | `resources\\codex.exe` (integrity reference) |
+| Runtime backend | `%LOCALAPPDATA%\\OpenAI\\Codex\\bin\\e305f1c75d8da435\\codex.exe` |
+
+This records the package and runtime backend used for standalone adapter proof;
+the Windows Store package's bundled CLI asset is protected by package
+execution rules, so the adapter uses the user-local backend. The current GUI
+build does not consume the router override for its local app-server. It is not
+a claim that the macOS patcher or Windows renderer anchors support this build.

@@ -47,6 +47,16 @@ The copied Computer Use service, Node runtime, and callers are re-signed under
 one Apple team. The helper uses a separate bundle identity and socket, avoiding
 the official app's privacy grants and app-group container.
 
+On Windows, the installer leaves the official Windows package in place and
+installs a standalone app-server command. `CODEX_MUX_REAL_CODEX` points at the
+user-local backend used by the official Windows app (or an explicitly supplied
+backend), while `CODEX_MUX_HOME` and `CODEX_HOME` point to router-owned state
+and primary-account directories. The protected package's bundled
+`resources\\codex.exe` is retained for integrity verification but is not
+assumed runnable outside the package identity. The current Windows GUI build
+does not consume the router override for its local app-server, so this adapter
+does not claim GUI/account-menu or Computer Use identity parity.
+
 ## Plugin behavior
 
 Plugin definitions and managed MCP configuration are shared. The Plugins page

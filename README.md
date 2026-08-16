@@ -2,7 +2,8 @@
 
 ![Multi-subscription account menu](screenshots/account-menu.png)
 
-Use multiple ChatGPT subscriptions from one independent macOS desktop app.
+Use multiple ChatGPT subscriptions from an independent macOS desktop app, or
+run the routing backend beside the official Windows Codex app.
 
 Codex Subscription Router creates a locally patched copy of the official
 ChatGPT app, balances new chats across connected subscriptions, and keeps every
@@ -78,6 +79,15 @@ Codex Subscription Router currently targets:
 | Go | 1.26 or newer |
 | Node.js | 22.12 or newer |
 
+The Windows adapter targets Windows x64 with the installed `OpenAI.Codex`
+package and Go 1.26+. It installs a standalone router command that uses the
+user-local backend already used by the official Windows app, leaves the
+protected Windows package unchanged, and keeps router state under
+`%LOCALAPPDATA%\\Codex Subscription Router`. Pass `-CodexExecutable` when
+discovery needs an explicit path. The current adapter does not claim official
+Windows GUI interception, the macOS renderer/account-menu, Computer Use
+identity, or provider-auth parity.
+
 The patcher verifies the official version, build, ASAR hash, renderer anchors,
 and native binary constants before changing anything. An unknown upstream build
 is rejected by default rather than being partially patched. See
@@ -109,6 +119,27 @@ same account state, creates a recoverable backup, and requires signing-team
 continuity so macOS privacy grants remain valid. It stops with a clear message
 instead of making a partial installation when a prerequisite or upstream
 compatibility check fails.
+
+### Windows adapter
+
+From a clone of this fork, run PowerShell without changing the machine-wide
+execution policy:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\\install.ps1
+```
+
+This builds `codex-mux.exe`, creates
+`%LOCALAPPDATA%\\Codex Subscription Router\\Codex Subscription Router.cmd`,
+and starts the standalone app-server router with a router-owned primary
+`CODEX_HOME`. It does not modify the official package. Pass
+`-OfficialExecutable C:\\path\\to\\ChatGPT.exe` or
+`-CodexExecutable C:\\path\\to\\codex.exe` when automatic discovery is not
+available. The install receipt includes package hashes and paths but never
+prints the control token. Invoke the `.cmd` launcher from a caller that speaks
+the Codex app-server stdio protocol; the current Windows GUI build does not
+consume the router override for its local app-server.
 
 > [!TIP]
 > To inspect the installer before running it, open

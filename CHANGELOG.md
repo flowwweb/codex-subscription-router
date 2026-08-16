@@ -9,6 +9,9 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 - One-command installer with safe source updates, prerequisite checks, signed
   rebuilds, recoverable upgrades, and automatic launch.
+- Windows adapter with a user-local PowerShell launcher, standalone app-server
+  routing, primary Codex home, user-local backend discovery, and package hash
+  checks.
 - Reset-aware routing that prioritizes weekly quota at risk of expiring and
   gives a bounded boost to subscriptions with banked usage resets.
 
