@@ -60,6 +60,40 @@ function Get-AbsolutePath([string] $Path) {
     return (Resolve-Path -LiteralPath $Path).Path
 }
 
+function Get-NormalizedPath([string] $Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        Fail "cannot normalize an empty path"
+    }
+    try {
+        $full = [System.IO.Path]::GetFullPath($Path)
+        if ($full.Length -gt 3) {
+            return $full.TrimEnd([char[]]@('\', '/'))
+        }
+        return $full
+    } catch {
+        Fail "could not normalize path '$Path': $($_.Exception.Message)"
+    }
+}
+
+function Test-PathWithin([string] $Path, [string] $Root) {
+    $normalizedPath = Get-NormalizedPath $Path
+    $normalizedRoot = Get-NormalizedPath $Root
+    if ($normalizedPath.Equals($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+    $prefix = $normalizedRoot
+    if (-not $prefix.EndsWith('\')) {
+        $prefix += '\'
+    }
+    return $normalizedPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Assert-NoPathCollision([string] $LeftLabel, [string] $Left, [string] $RightLabel, [string] $Right) {
+    if ((Test-PathWithin $Left $Right) -or (Test-PathWithin $Right $Left)) {
+        Fail "$LeftLabel and $RightLabel overlap; choose paths with separate ownership"
+    }
+}
+
 function Resolve-CodexBackend {
     param([string] $ExplicitPath)
 
@@ -120,6 +154,10 @@ if (-not (Get-Command go.exe -ErrorAction SilentlyContinue)) {
     Fail "Go 1.26 or newer is required"
 }
 
+$normalizedSourceRoot = Get-NormalizedPath $sourceRoot
+$normalizedInstallRoot = Get-NormalizedPath $installRoot
+Assert-NoPathCollision "source checkout" $normalizedSourceRoot "router install" $normalizedInstallRoot
+
 $official = Get-AbsolutePath (Resolve-OfficialExecutable -ExplicitPath $OfficialExecutable)
 $officialRoot = Split-Path -Parent $official
 $officialCodex = Join-Path $officialRoot "resources\codex.exe"
@@ -127,6 +165,9 @@ if (-not (Test-Path -LiteralPath $officialCodex -PathType Leaf)) {
     Fail "the official app does not contain resources\\codex.exe: $officialCodex"
 }
 $codexBackend = Get-AbsolutePath (Resolve-CodexBackend -ExplicitPath $CodexExecutable)
+
+Assert-NoPathCollision "official app" (Get-NormalizedPath $officialRoot) "router install" $normalizedInstallRoot
+Assert-NoPathCollision "Codex backend" (Get-NormalizedPath (Split-Path -Parent $codexBackend)) "router install" $normalizedInstallRoot
 
 $asar = Join-Path $officialRoot "resources\app.asar"
 $beforeAsarHash = (Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash

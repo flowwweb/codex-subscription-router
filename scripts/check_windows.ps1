@@ -23,7 +23,19 @@ if ($launcher -notmatch "launch-router\.ps1") {
 $installer = Get-Content -LiteralPath (Join-Path $root "install.ps1") -Raw
 $launcherScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\launch-router.ps1") -Raw
 $contracts = "$installer`n$launcherScript"
-foreach ($required in @("codexBackendExecutable", "CODEX_MUX_REAL_CODEX", "CODEX_MUX_HOME", "primaryCodexHome", "Get-FileHash")) {
+foreach ($required in @(
+    "codexBackendExecutable",
+    "CODEX_MUX_REAL_CODEX",
+    "CODEX_MUX_HOME",
+    "primaryCodexHome",
+    "Get-FileHash",
+    "Assert-NoPathCollision",
+    "source checkout",
+    "router install",
+    "Test-PathWithin",
+    "%USERPROFILE%\\.codex",
+    "ReparsePoint"
+)) {
     if ($contracts -notmatch [regex]::Escape($required)) {
         throw "Windows installer is missing required contract: $required"
     }
