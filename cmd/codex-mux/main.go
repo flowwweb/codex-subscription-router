@@ -1,20 +1,17 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
-	"strconv"
+	stdruntime "runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -22,10 +19,11 @@ import (
 	"github.com/b-nnett/codex-subscription-router/internal/control"
 	"github.com/b-nnett/codex-subscription-router/internal/mux"
 	"github.com/b-nnett/codex-subscription-router/internal/protocol"
+	muxruntime "github.com/b-nnett/codex-subscription-router/internal/runtime"
 	"github.com/b-nnett/codex-subscription-router/internal/state"
 )
 
-const defaultControlPort = 48123
+var buildID = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -35,22 +33,80 @@ func main() {
 }
 
 func run() error {
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "daemon" {
+		return runDaemon(args[1:])
+	}
+	if isInteractiveAppServer(args) {
+		return runBridge()
+	}
 	realExecutable, err := resolveRealExecutable()
 	if err != nil {
 		return err
 	}
-	args := os.Args[1:]
-	if !isInteractiveAppServer(args) {
-		return passthrough(realExecutable, args)
-	}
+	return passthrough(realExecutable, args)
+}
 
+func runtimeRoot() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("resolve home directory: %w", err)
+		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
 	root := os.Getenv("CODEX_MUX_HOME")
 	if root == "" {
 		root = filepath.Join(home, ".codex-mux")
+	}
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve runtime root: %w", err)
+	}
+	return absolute, nil
+}
+
+func runBridge() error {
+	root, err := runtimeRoot()
+	if err != nil {
+		return err
+	}
+	receipt, err := muxruntime.ReadReceipt(root)
+	if err != nil {
+		return fmt.Errorf("router daemon is unavailable; start codex-mux daemon first: %w", err)
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	probeCtx, probeCancel := context.WithTimeout(ctx, 2*time.Second)
+	err = muxruntime.Probe(probeCtx, receipt)
+	probeCancel()
+	if err != nil {
+		return fmt.Errorf("router daemon receipt is stale or unhealthy: %w", err)
+	}
+	return muxruntime.RunBridge(ctx, receipt, os.Stdin, os.Stdout)
+}
+
+func runDaemon(realArgs []string) error {
+	if len(realArgs) == 0 {
+		realArgs = []string{"app-server"}
+	}
+	if !isInteractiveAppServer(realArgs) {
+		return errors.New("daemon requires interactive app-server arguments")
+	}
+	realExecutable, err := resolveRealExecutable()
+	if err != nil {
+		return err
+	}
+	root, err := runtimeRoot()
+	if err != nil {
+		return err
+	}
+	owner, err := muxruntime.Acquire(root, buildID)
+	if err != nil {
+		return err
+	}
+	defer owner.Close()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home directory: %w", err)
 	}
 	primaryCodexHome := os.Getenv("CODEX_HOME")
 	if primaryCodexHome == "" {
@@ -63,12 +119,13 @@ func run() error {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	output := &muxruntime.OutputHub{}
 	multiplexer, err := mux.New(mux.Options{
 		RealExecutable: realExecutable,
-		RealArgs:       args,
+		RealArgs:       realArgs,
 		Environment:    os.Environ(),
 		Store:          store,
-		Output:         os.Stdout,
+		Output:         output,
 	})
 	if err != nil {
 		return err
@@ -82,46 +139,56 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	port := defaultControlPort
-	if value := os.Getenv("CODEX_MUX_CONTROL_PORT"); value != "" {
-		if parsed, parseErr := strconv.Atoi(value); parseErr == nil && parsed > 0 && parsed <= 65535 {
-			port = parsed
+	receipt := owner.Receipt()
+	controlServer := control.New(
+		receipt.ControlAddress,
+		token,
+		multiplexer,
+		os.Getenv("CODEX_MUX_UI_TESTS") == "1",
+	)
+	errorsChannel := make(chan error, 2)
+	go func() {
+		serveErr := controlServer.Serve(owner.ControlListener())
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			errorsChannel <- fmt.Errorf("control server: %w", serveErr)
 		}
-	}
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "codex-mux: account UI unavailable: %v\n", err)
-	} else {
-		controlServer := control.New(
-			listener.Addr().String(),
-			token,
-			multiplexer,
-			os.Getenv("CODEX_MUX_UI_TESTS") == "1",
-		)
-		go func() {
-			if serveErr := controlServer.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-				fmt.Fprintf(os.Stderr, "codex-mux: control server: %v\n", serveErr)
+	}()
+	go func() {
+		errorsChannel <- muxruntime.ServeBridge(ctx, owner.BridgeListener(), receipt.Instance, output, func(line []byte) {
+			message, parseErr := protocol.Parse(line)
+			if parseErr != nil {
+				fmt.Fprintf(os.Stderr, "codex-mux: ignore invalid client JSON: %v\n", parseErr)
+				return
 			}
-		}()
-		defer func() {
-			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer shutdownCancel()
-			_ = controlServer.Shutdown(shutdownCtx)
-		}()
+			multiplexer.HandleClient(message)
+		})
+	}()
+	if err := owner.Publish(cancel); err != nil {
+		return err
 	}
+	probeCtx, probeCancel := context.WithTimeout(ctx, 2*time.Second)
+	err = muxruntime.Probe(probeCtx, receipt)
+	probeCancel()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "codex-mux: daemon ready pid=%d address=%s build=%s\n", receipt.PID, receipt.Address, receipt.Build)
 
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
-	for scanner.Scan() {
-		message, parseErr := protocol.Parse(scanner.Bytes())
-		if parseErr != nil {
-			fmt.Fprintf(os.Stderr, "codex-mux: ignore invalid client JSON: %v\n", parseErr)
-			continue
+	select {
+	case <-ctx.Done():
+	case serveErr := <-errorsChannel:
+		if serveErr != nil {
+			return serveErr
 		}
-		multiplexer.HandleClient(message)
 	}
 	cancel()
-	return scanner.Err()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	shutdownErr := controlServer.Shutdown(shutdownCtx)
+	shutdownCancel()
+	if closeErr := owner.Close(); closeErr != nil {
+		return errors.Join(shutdownErr, closeErr)
+	}
+	return shutdownErr
 }
 
 func resolveRealExecutable() (string, error) {
@@ -141,7 +208,7 @@ func resolveRealExecutable() (string, error) {
 	}
 	base := filepath.Join(filepath.Dir(executable), "codex.real")
 	candidates := []string{base}
-	if runtime.GOOS == "windows" {
+	if stdruntime.GOOS == "windows" {
 		candidates = []string{base + ".exe", base}
 	}
 	for _, candidate := range candidates {
