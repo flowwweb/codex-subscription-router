@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Subscription Router</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="status-card">
+      <div>
+        <p class="eyebrow">Subscription Router</p>
+        <h1 id="status-title">Starting your router…</h1>
+        <p id="status-detail">Checking your subscriptions. This usually takes a few seconds.</p>
+      </div>
+      <span id="health-badge" class="badge" aria-live="polite">Checking</span>
+    </header>
+
+    <section aria-labelledby="subscriptions-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Subscriptions</p>
+          <h2 id="subscriptions-title">Your ChatGPT subscriptions</h2>
+        </div>
+        <button id="connect" class="primary" type="button">Connect subscription</button>
+      </div>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div id="accounts" class="accounts" aria-busy="true"></div>
+    </section>
+
+    <aside class="constraint">
+      <strong>Windows app note</strong>
+      <p>This dashboard manages subscriptions for the standalone app-server router. The official Codex Windows app does not currently route through it.</p>
+    </aside>
+
+    <details>
+      <summary>Technical details</summary>
+      <p>Runs locally on this computer. Account credentials stay in the router’s protected account homes.</p>
+    </details>
+  </main>
+  <template id="account-template">
+    <article class="account-card">
+      <div class="account-main">
+        <h3 class="account-name"></h3>
+        <p class="account-identity"></p>
+        <div class="usage"></div>
+      </div>
+      <div class="account-actions">
+        <label class="toggle-label"><input class="enabled" type="checkbox"><span></span></label>
+        <button class="rename secondary" type="button">Rename</button>
+        <button class="login secondary" type="button">Connect</button>
+      </div>
+    </article>
+  </template>
+</body>
+</html>
