@@ -21,6 +21,12 @@ import (
 
 const requestTimeout = 30 * time.Second
 
+const (
+	maxChildRestartAttempts = 3
+	childRestartBaseDelay   = 250 * time.Millisecond
+	childRestartStableAfter = 30 * time.Second
+)
+
 type Options struct {
 	RealExecutable string
 	RealArgs       []string
@@ -59,7 +65,13 @@ type Multiplexer struct {
 
 	childrenMu sync.RWMutex
 	children   map[string]*backend.Child
+	childStart map[string]time.Time
+	restarts   map[string]int
+	startMu    sync.Mutex
 	inbound    chan backend.Inbound
+	runCtx     context.Context
+	runCancel  context.CancelFunc
+	closeOnce  sync.Once
 
 	initializationMu sync.RWMutex
 	initializeParams json.RawMessage
@@ -89,12 +101,18 @@ type Multiplexer struct {
 
 	resetPreviewMu sync.RWMutex
 	resetPreviews  map[string]ResetCreditsPreview
+
+	loginMu       sync.Mutex
+	loginAttempts map[string]LoginAttempt
+	loginKeys     map[string]string
+	loginReady    map[string]chan struct{}
 }
 
 func New(options Options) (*Multiplexer, error) {
 	if options.RealExecutable == "" || options.Store == nil || options.Output == nil {
 		return nil, errors.New("real executable, store, and output are required")
 	}
+	runCtx, runCancel := context.WithCancel(context.Background())
 	return &Multiplexer{
 		realExecutable:       options.RealExecutable,
 		realArgs:             append([]string(nil), options.RealArgs...),
@@ -102,7 +120,11 @@ func New(options Options) (*Multiplexer, error) {
 		store:                options.Store,
 		output:               options.Output,
 		children:             make(map[string]*backend.Child),
+		childStart:           make(map[string]time.Time),
+		restarts:             make(map[string]int),
 		inbound:              make(chan backend.Inbound, 1024),
+		runCtx:               runCtx,
+		runCancel:            runCancel,
 		externalRoutes:       make(map[string]externalRoute),
 		serverRoutes:         make(map[string]serverRequestRoute),
 		events:               make(map[chan Event]struct{}),
@@ -112,11 +134,17 @@ func New(options Options) (*Multiplexer, error) {
 		resetCreditsCache:    make(map[string]resetCreditsCacheEntry),
 		resetCreditsEndpoint: rateLimitResetCreditsURL,
 		resetPreviews:        make(map[string]ResetCreditsPreview),
+		loginAttempts:        make(map[string]LoginAttempt),
+		loginKeys:            make(map[string]string),
+		loginReady:           make(map[string]chan struct{}),
 	}, nil
 }
 
 func (m *Multiplexer) Start(ctx context.Context) error {
 	for _, account := range m.store.Accounts() {
+		if !account.Enabled {
+			continue
+		}
 		if _, err := m.startChild(ctx, account); err != nil {
 			fmt.Fprintf(os.Stderr, "codex-mux: start account %s: %v\n", account.ID, err)
 		}
@@ -145,9 +173,26 @@ func (m *Multiplexer) syncManagedConfigLoop(ctx context.Context) {
 }
 
 func (m *Multiplexer) Close() {
-	for _, entry := range m.childEntries() {
-		_ = entry.child.Close()
-	}
+	m.closeOnce.Do(func() {
+		m.runCancel()
+		m.childrenMu.Lock()
+		children := make([]*backend.Child, 0, len(m.children))
+		for accountID, child := range m.children {
+			children = append(children, child)
+			delete(m.children, accountID)
+			delete(m.childStart, accountID)
+		}
+		m.childrenMu.Unlock()
+		var wait sync.WaitGroup
+		for _, child := range children {
+			wait.Add(1)
+			go func(child *backend.Child) {
+				defer wait.Done()
+				_ = child.Close()
+			}(child)
+		}
+		wait.Wait()
+	})
 }
 
 func (m *Multiplexer) HandleClient(message protocol.Message) {
@@ -596,8 +641,22 @@ func (m *Multiplexer) controllerChild() (*backend.Child, bool) {
 }
 
 func (m *Multiplexer) startChild(ctx context.Context, account state.Account) (*backend.Child, error) {
+	if !account.Enabled {
+		return nil, fmt.Errorf("account %q is disabled", account.ID)
+	}
+	return m.startChildInternal(ctx, account, true)
+}
+
+func (m *Multiplexer) startChildInternal(ctx context.Context, account state.Account, resetRestarts bool) (*backend.Child, error) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
 	if child, ok := m.child(account.ID); ok {
 		return child, nil
+	}
+	select {
+	case <-m.runCtx.Done():
+		return nil, errors.New("multiplexer is closed")
+	default:
 	}
 	child, err := backend.Start(
 		account.ID,
@@ -610,9 +669,6 @@ func (m *Multiplexer) startChild(ctx context.Context, account state.Account) (*b
 	if err != nil {
 		return nil, err
 	}
-	m.childrenMu.Lock()
-	m.children[account.ID] = child
-	m.childrenMu.Unlock()
 
 	m.initializationMu.RLock()
 	params := append(json.RawMessage(nil), m.initializeParams...)
@@ -623,13 +679,98 @@ func (m *Multiplexer) startChild(ctx context.Context, account state.Account) (*b
 		_, err := child.Request(requestCtx, "initialize", params)
 		cancel()
 		if err != nil {
+			_ = child.Close()
 			return nil, err
 		}
 		if initialized {
 			_ = child.Send(protocol.Message{Method: "initialized"})
 		}
 	}
+	m.childrenMu.Lock()
+	m.children[account.ID] = child
+	m.childStart[account.ID] = time.Now()
+	if resetRestarts {
+		m.restarts[account.ID] = 0
+	}
+	m.childrenMu.Unlock()
+	go m.watchChild(account.ID, child)
 	return child, nil
+}
+
+func (m *Multiplexer) stopChild(accountID string) error {
+	m.childrenMu.Lock()
+	child := m.children[accountID]
+	if child != nil {
+		delete(m.children, accountID)
+		delete(m.childStart, accountID)
+	}
+	m.restarts[accountID] = 0
+	m.childrenMu.Unlock()
+	if child == nil {
+		return nil
+	}
+	return child.Close()
+}
+
+func (m *Multiplexer) watchChild(accountID string, child *backend.Child) {
+	<-child.Done()
+	m.childrenMu.Lock()
+	if m.children[accountID] != child {
+		m.childrenMu.Unlock()
+		return
+	}
+	started := m.childStart[accountID]
+	delete(m.children, accountID)
+	delete(m.childStart, accountID)
+	if time.Since(started) >= childRestartStableAfter {
+		m.restarts[accountID] = 0
+	}
+	m.childrenMu.Unlock()
+
+	select {
+	case <-m.runCtx.Done():
+		return
+	default:
+	}
+	account, ok := m.store.Account(accountID)
+	if !ok || !account.Enabled {
+		return
+	}
+	m.publish(Event{Type: "account-restarting", AccountID: accountID, Message: "Subscription backend stopped; restarting"})
+	go m.restartChild(accountID)
+}
+
+func (m *Multiplexer) restartChild(accountID string) {
+	for {
+		m.childrenMu.Lock()
+		if m.children[accountID] != nil {
+			m.childrenMu.Unlock()
+			return
+		}
+		m.restarts[accountID]++
+		attempt := m.restarts[accountID]
+		m.childrenMu.Unlock()
+		if attempt > maxChildRestartAttempts {
+			m.publish(Event{Type: "account-unavailable", AccountID: accountID, Message: "Subscription backend could not be restarted"})
+			return
+		}
+		delay := childRestartBaseDelay * time.Duration(1<<(attempt-1))
+		timer := time.NewTimer(delay)
+		select {
+		case <-m.runCtx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		account, ok := m.store.Account(accountID)
+		if !ok || !account.Enabled {
+			return
+		}
+		if _, err := m.startChildInternal(m.runCtx, account, false); err == nil {
+			m.publish(Event{Type: "account-restarted", AccountID: accountID, Message: "Subscription backend restarted"})
+			return
+		}
+	}
 }
 
 func (m *Multiplexer) SubscribeEvents() (<-chan Event, func()) {
@@ -663,6 +804,9 @@ func (m *Multiplexer) publishAccountRefresh(accountID string) {
 	defer cancel()
 	snapshot, err := m.accountSnapshot(ctx, accountID)
 	if err == nil {
+		if snapshot.Connected {
+			m.completeLoginAttempts(accountID)
+		}
 		m.publish(Event{Type: "account-updated", AccountID: accountID, Data: snapshot})
 	}
 }

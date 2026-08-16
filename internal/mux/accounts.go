@@ -2,6 +2,8 @@ package mux
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,43 @@ import (
 )
 
 var errNoSubscriptionCapacity = errors.New("no enabled ChatGPT subscription has capacity")
+
+const loginAttemptLifetime = 15 * time.Minute
+
+const maxIdempotencyKeyLength = 128
+
+type LoginState string
+
+const (
+	LoginPending   LoginState = "pending"
+	LoginSucceeded LoginState = "succeeded"
+	LoginFailed    LoginState = "failed"
+	LoginExpired   LoginState = "expired"
+	LoginCancelled LoginState = "cancelled"
+)
+
+type LoginAttempt struct {
+	ID        string          `json:"id"`
+	AccountID string          `json:"accountId"`
+	Mode      string          `json:"mode"`
+	State     LoginState      `json:"state"`
+	Result    json.RawMessage `json:"result,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	StartedAt int64           `json:"startedAt"`
+	UpdatedAt int64           `json:"updatedAt"`
+	ExpiresAt int64           `json:"expiresAt"`
+}
+
+type AccountProvisionError struct {
+	AccountID string
+	Err       error
+}
+
+func (e *AccountProvisionError) Error() string {
+	return fmt.Sprintf("prepare account %q: %v", e.AccountID, e.Err)
+}
+
+func (e *AccountProvisionError) Unwrap() error { return e.Err }
 
 const (
 	routingFallbackWindow      = 7 * 24 * time.Hour
@@ -99,19 +138,62 @@ func (m *Multiplexer) accountSnapshots(ctx context.Context, includeProfile bool)
 }
 
 func (m *Multiplexer) AddAccount(ctx context.Context, label string) (AccountSnapshot, error) {
-	account, err := m.store.AddAccount(label)
+	key, err := opaqueID()
 	if err != nil {
 		return AccountSnapshot{}, err
 	}
-	if _, err := m.startChild(ctx, account); err != nil {
+	return m.AddAccountIdempotent(ctx, label, key)
+}
+
+// AddAccountIdempotent durably reuses the account created for key.
+func (m *Multiplexer) AddAccountIdempotent(ctx context.Context, label, key string) (AccountSnapshot, error) {
+	if err := validateIdempotencyKey(key); err != nil {
 		return AccountSnapshot{}, err
+	}
+	account, created, err := m.store.AddAccountIdempotent(label, key)
+	if err != nil {
+		return AccountSnapshot{}, err
+	}
+	if !created {
+		if !account.Enabled {
+			enabled := true
+			return m.UpdateAccount(ctx, account.ID, nil, &enabled)
+		}
+		if _, err := m.startChild(ctx, account); err != nil {
+			return AccountSnapshot{}, &AccountProvisionError{AccountID: account.ID, Err: err}
+		}
+		return m.accountSnapshot(ctx, account.ID)
+	}
+	if _, err := m.startChild(ctx, account); err != nil {
+		disabled := false
+		_, _ = m.store.UpdateAccount(account.ID, nil, &disabled)
+		return AccountSnapshot{}, &AccountProvisionError{AccountID: account.ID, Err: err}
 	}
 	return m.accountSnapshot(ctx, account.ID)
 }
 
 func (m *Multiplexer) UpdateAccount(ctx context.Context, id string, label *string, enabled *bool) (AccountSnapshot, error) {
-	if _, err := m.store.UpdateAccount(id, label, enabled); err != nil {
+	previous, ok := m.store.Account(id)
+	if !ok {
+		return AccountSnapshot{}, fmt.Errorf("account %q not found", id)
+	}
+	updated, err := m.store.UpdateAccount(id, label, enabled)
+	if err != nil {
 		return AccountSnapshot{}, err
+	}
+	if enabled != nil && !*enabled {
+		if err := m.stopChild(id); err != nil {
+			return AccountSnapshot{}, fmt.Errorf("stop disabled account %q: %w", id, err)
+		}
+	}
+	if enabled != nil && *enabled {
+		if _, err := m.startChild(ctx, updated); err != nil {
+			if !previous.Enabled {
+				disabled := false
+				_, _ = m.store.UpdateAccount(id, nil, &disabled)
+			}
+			return AccountSnapshot{}, fmt.Errorf("start enabled account %q: %w", id, err)
+		}
 	}
 	return m.accountSnapshot(ctx, id)
 }
@@ -125,19 +207,154 @@ func (m *Multiplexer) ThreadAccount(ctx context.Context, threadID string) (Accou
 }
 
 func (m *Multiplexer) StartLogin(ctx context.Context, id, mode string) (json.RawMessage, error) {
-	if mode != "chatgpt" && mode != "chatgptDeviceCode" {
-		return nil, errors.New("login mode must be chatgpt or chatgptDeviceCode")
-	}
-	child, ok := m.child(id)
-	if !ok {
-		return nil, fmt.Errorf("account %q is unavailable", id)
-	}
-	params, _ := json.Marshal(map[string]any{"type": mode})
-	response, err := child.Request(ctx, "account/login/start", params)
+	key, err := opaqueID()
 	if err != nil {
 		return nil, err
 	}
-	return response.Result, nil
+	attempt, err := m.StartLoginAttempt(ctx, id, mode, key)
+	return attempt.Result, err
+}
+
+func (m *Multiplexer) StartLoginAttempt(ctx context.Context, id, mode, key string) (LoginAttempt, error) {
+	if mode != "chatgpt" && mode != "chatgptDeviceCode" {
+		return LoginAttempt{}, errors.New("login mode must be chatgpt or chatgptDeviceCode")
+	}
+	if err := validateIdempotencyKey(key); err != nil {
+		return LoginAttempt{}, err
+	}
+	m.loginMu.Lock()
+	if attemptID := m.loginKeys[key]; attemptID != "" {
+		ready := m.loginReady[attemptID]
+		m.loginMu.Unlock()
+		return m.waitForLoginStart(ctx, attemptID, ready)
+	}
+	m.loginMu.Unlock()
+	account, ok := m.store.Account(id)
+	if !ok {
+		return LoginAttempt{}, fmt.Errorf("account %q not found", id)
+	}
+	if !account.Enabled {
+		return LoginAttempt{}, fmt.Errorf("account %q is disabled", id)
+	}
+	child, ok := m.child(id)
+	if !ok {
+		var err error
+		child, err = m.startChild(ctx, account)
+		if err != nil {
+			return LoginAttempt{}, fmt.Errorf("account %q is unavailable: %w", id, err)
+		}
+	}
+	attemptID, err := opaqueID()
+	if err != nil {
+		return LoginAttempt{}, err
+	}
+	now := m.now().Unix()
+	attempt := LoginAttempt{
+		ID: attemptID, AccountID: id, Mode: mode, State: LoginPending,
+		StartedAt: now, UpdatedAt: now, ExpiresAt: m.now().Add(loginAttemptLifetime).Unix(),
+	}
+	m.loginMu.Lock()
+	if existingID := m.loginKeys[key]; existingID != "" {
+		ready := m.loginReady[existingID]
+		m.loginMu.Unlock()
+		return m.waitForLoginStart(ctx, existingID, ready)
+	}
+	m.loginKeys[key] = attempt.ID
+	m.loginAttempts[attempt.ID] = attempt
+	m.loginReady[attempt.ID] = make(chan struct{})
+	m.loginMu.Unlock()
+	params, _ := json.Marshal(map[string]any{"type": mode})
+	response, err := child.Request(ctx, "account/login/start", params)
+	if err != nil {
+		m.loginMu.Lock()
+		attempt = m.loginAttempts[attempt.ID]
+		attempt.State = LoginFailed
+		attempt.Error = err.Error()
+		attempt.UpdatedAt = m.now().Unix()
+		m.loginAttempts[attempt.ID] = attempt
+		close(m.loginReady[attempt.ID])
+		delete(m.loginReady, attempt.ID)
+		m.loginMu.Unlock()
+		m.publish(Event{Type: "account-login", AccountID: id, Data: attempt})
+		return attempt, err
+	}
+	m.loginMu.Lock()
+	attempt = m.loginAttempts[attempt.ID]
+	attempt.Result = append(json.RawMessage(nil), response.Result...)
+	attempt.UpdatedAt = m.now().Unix()
+	m.loginAttempts[attempt.ID] = attempt
+	close(m.loginReady[attempt.ID])
+	delete(m.loginReady, attempt.ID)
+	m.loginMu.Unlock()
+	m.publish(Event{Type: "account-login", AccountID: id, Data: attempt})
+	return attempt, nil
+}
+
+func (m *Multiplexer) LoginStatus(attemptID string) (LoginAttempt, error) {
+	m.loginMu.Lock()
+	defer m.loginMu.Unlock()
+	attempt, ok := m.loginAttempts[attemptID]
+	if !ok {
+		return LoginAttempt{}, fmt.Errorf("login attempt %q not found", attemptID)
+	}
+	if attempt.State == LoginPending && m.now().Unix() >= attempt.ExpiresAt {
+		attempt.State = LoginExpired
+		attempt.Error = "login expired before the subscription connected"
+		attempt.UpdatedAt = m.now().Unix()
+		m.loginAttempts[attemptID] = attempt
+	}
+	return cloneLoginAttempt(attempt), nil
+}
+
+func (m *Multiplexer) CancelLogin(ctx context.Context, attemptID string) (LoginAttempt, error) {
+	m.loginMu.Lock()
+	attempt, ok := m.loginAttempts[attemptID]
+	if !ok {
+		m.loginMu.Unlock()
+		return LoginAttempt{}, fmt.Errorf("login attempt %q not found", attemptID)
+	}
+	if attempt.State != LoginPending {
+		m.loginMu.Unlock()
+		return cloneLoginAttempt(attempt), nil
+	}
+	m.loginMu.Unlock()
+	if err := m.Logout(ctx, attempt.AccountID); err != nil {
+		return cloneLoginAttempt(attempt), fmt.Errorf("cancel login: %w", err)
+	}
+	m.loginMu.Lock()
+	attempt = m.loginAttempts[attemptID]
+	if attempt.State != LoginPending {
+		m.loginMu.Unlock()
+		return cloneLoginAttempt(attempt), nil
+	}
+	attempt.State = LoginCancelled
+	attempt.Error = "login cancelled"
+	attempt.UpdatedAt = m.now().Unix()
+	m.loginAttempts[attemptID] = attempt
+	m.loginMu.Unlock()
+	m.publish(Event{Type: "account-login", AccountID: attempt.AccountID, Data: attempt})
+	return cloneLoginAttempt(attempt), nil
+}
+
+func (m *Multiplexer) RemoveAccount(id string) error {
+	account, ok := m.store.Account(id)
+	if !ok {
+		return fmt.Errorf("account %q not found", id)
+	}
+	if account.Controller {
+		return errors.New("controller account cannot be removed")
+	}
+	if err := m.stopChild(id); err != nil {
+		return err
+	}
+	if err := m.store.RemoveAccount(id); err != nil {
+		if account.Enabled {
+			_, _ = m.startChild(context.Background(), account)
+		}
+		return err
+	}
+	m.cancelLoginAttemptsForAccount(id)
+	return nil
 }
 
 func (m *Multiplexer) Logout(ctx context.Context, id string) error {
@@ -160,6 +377,13 @@ func (m *Multiplexer) accountSnapshotWithProfile(ctx context.Context, accountID 
 	}
 	child, ok := m.child(accountID)
 	if !ok {
+		if !account.Enabled {
+			return AccountSnapshot{
+				ID: account.ID, Label: account.Label, Enabled: false,
+				Controller: account.Controller, CreatedAt: account.CreatedAt,
+				ThreadCount: m.store.ThreadCounts()[account.ID],
+			}, nil
+		}
 		return AccountSnapshot{}, fmt.Errorf("account %q app-server is unavailable", accountID)
 	}
 	params := json.RawMessage(`{"refreshToken":false}`)
@@ -207,6 +431,81 @@ func (m *Multiplexer) accountSnapshotWithProfile(ctx context.Context, accountID 
 	}
 	m.applyRateLimitPreview(&snapshot)
 	return snapshot, nil
+}
+
+func (m *Multiplexer) completeLoginAttempts(accountID string) {
+	m.loginMu.Lock()
+	defer m.loginMu.Unlock()
+	for id, attempt := range m.loginAttempts {
+		if attempt.AccountID != accountID || attempt.State != LoginPending {
+			continue
+		}
+		attempt.State = LoginSucceeded
+		attempt.Error = ""
+		attempt.UpdatedAt = m.now().Unix()
+		m.loginAttempts[id] = attempt
+	}
+}
+
+func (m *Multiplexer) cancelLoginAttemptsForAccount(accountID string) {
+	m.loginMu.Lock()
+	defer m.loginMu.Unlock()
+	for id, attempt := range m.loginAttempts {
+		if attempt.AccountID != accountID || attempt.State != LoginPending {
+			continue
+		}
+		attempt.State = LoginCancelled
+		attempt.Error = "account removed"
+		attempt.UpdatedAt = m.now().Unix()
+		m.loginAttempts[id] = attempt
+	}
+}
+
+func (m *Multiplexer) loginAttemptLocked(id string) LoginAttempt {
+	return cloneLoginAttempt(m.loginAttempts[id])
+}
+
+func (m *Multiplexer) waitForLoginStart(ctx context.Context, attemptID string, ready <-chan struct{}) (LoginAttempt, error) {
+	if ready != nil {
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			m.loginMu.Lock()
+			attempt := m.loginAttemptLocked(attemptID)
+			m.loginMu.Unlock()
+			return attempt, ctx.Err()
+		}
+	}
+	m.loginMu.Lock()
+	attempt, ok := m.loginAttempts[attemptID]
+	m.loginMu.Unlock()
+	if !ok {
+		return LoginAttempt{}, fmt.Errorf("login attempt %q not found", attemptID)
+	}
+	return cloneLoginAttempt(attempt), nil
+}
+
+func cloneLoginAttempt(attempt LoginAttempt) LoginAttempt {
+	attempt.Result = append(json.RawMessage(nil), attempt.Result...)
+	return attempt
+}
+
+func opaqueID() (string, error) {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		return "", fmt.Errorf("generate identifier: %w", err)
+	}
+	return hex.EncodeToString(value), nil
+}
+
+func validateIdempotencyKey(key string) error {
+	if key == "" {
+		return errors.New("idempotency key is required")
+	}
+	if len(key) > maxIdempotencyKeyLength {
+		return fmt.Errorf("idempotency key exceeds %d bytes", maxIdempotencyKeyLength)
+	}
+	return nil
 }
 
 func planLabel(planType string) string {

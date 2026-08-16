@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +16,8 @@ import (
 )
 
 const stateVersion = 1
+
+const maxAccountCreateKeyLength = 128
 
 type Account struct {
 	ID         string `json:"id"`
@@ -26,9 +29,10 @@ type Account struct {
 }
 
 type persistedState struct {
-	Version     int               `json:"version"`
-	Accounts    []Account         `json:"accounts"`
-	ThreadOwner map[string]string `json:"threadOwner"`
+	Version           int               `json:"version"`
+	Accounts          []Account         `json:"accounts"`
+	ThreadOwner       map[string]string `json:"threadOwner"`
+	AccountCreateKeys map[string]string `json:"accountCreateKeys,omitempty"`
 }
 
 // Store persists only routing metadata. OAuth credentials and conversation
@@ -40,6 +44,7 @@ type Store struct {
 	primaryCodexHome string
 	accounts         []Account
 	owners           map[string]string
+	accountCreateKey map[string]string
 }
 
 func Open(root, primaryCodexHome string) (*Store, error) {
@@ -70,6 +75,7 @@ func Open(root, primaryCodexHome string) (*Store, error) {
 		path:             filepath.Join(root, "state.json"),
 		primaryCodexHome: primaryCodexHome,
 		owners:           make(map[string]string),
+		accountCreateKey: make(map[string]string),
 	}
 	if _, statErr := os.Stat(store.path); statErr == nil {
 		if err := SecureFile(store.path); err != nil {
@@ -91,6 +97,9 @@ func Open(root, primaryCodexHome string) (*Store, error) {
 		store.accounts = persisted.Accounts
 		if persisted.ThreadOwner != nil {
 			store.owners = persisted.ThreadOwner
+		}
+		if persisted.AccountCreateKeys != nil {
+			store.accountCreateKey = persisted.AccountCreateKeys
 		}
 	case errors.Is(err, os.ErrNotExist):
 		store.accounts = []Account{{
@@ -175,8 +184,28 @@ func (s *Store) Controller() (Account, bool) {
 }
 
 func (s *Store) AddAccount(label string) (Account, error) {
+	account, _, err := s.AddAccountIdempotent(label, "")
+	return account, err
+}
+
+// AddAccountIdempotent returns the account already associated with key. Empty
+// keys preserve the original always-create behavior.
+func (s *Store) AddAccountIdempotent(label, key string) (Account, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(key) > maxAccountCreateKeyLength {
+		return Account{}, false, fmt.Errorf("account creation key exceeds %d bytes", maxAccountCreateKeyLength)
+	}
+	if key != "" {
+		if accountID := s.accountCreateKey[key]; accountID != "" {
+			for _, account := range s.accounts {
+				if account.ID == accountID {
+					return account, false, nil
+				}
+			}
+			return Account{}, false, fmt.Errorf("account creation key refers to missing account %q", accountID)
+		}
+	}
 
 	label = strings.TrimSpace(label)
 	if label == "" {
@@ -184,17 +213,17 @@ func (s *Store) AddAccount(label string) (Account, error) {
 	}
 	id, err := randomID()
 	if err != nil {
-		return Account{}, err
+		return Account{}, false, err
 	}
 	codexHome := filepath.Join(s.root, "accounts", id, "codex-home")
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {
-		return Account{}, fmt.Errorf("create account home: %w", err)
+		return Account{}, false, fmt.Errorf("create account home: %w", err)
 	}
 	if err := os.Chmod(codexHome, 0o700); err != nil {
-		return Account{}, fmt.Errorf("secure account home: %w", err)
+		return Account{}, false, fmt.Errorf("secure account home: %w", err)
 	}
 	if err := syncIsolatedConfig(s.primaryCodexHome, codexHome); err != nil {
-		return Account{}, fmt.Errorf("write account config: %w", err)
+		return Account{}, false, fmt.Errorf("write account config: %w", err)
 	}
 
 	account := Account{
@@ -205,10 +234,82 @@ func (s *Store) AddAccount(label string) (Account, error) {
 		CreatedAt: time.Now().Unix(),
 	}
 	s.accounts = append(s.accounts, account)
-	if err := s.saveLocked(); err != nil {
-		return Account{}, err
+	if key != "" {
+		s.accountCreateKey[key] = account.ID
 	}
-	return account, nil
+	if err := s.saveLocked(); err != nil {
+		s.accounts = s.accounts[:len(s.accounts)-1]
+		delete(s.accountCreateKey, key)
+		return Account{}, false, err
+	}
+	return account, true, nil
+}
+
+// RemoveAccount removes non-controller routing metadata and moves its isolated
+// home into a recoverable removed-accounts directory.
+func (s *Store) RemoveAccount(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index := -1
+	var account Account
+	for candidateIndex, candidate := range s.accounts {
+		if candidate.ID == id {
+			index = candidateIndex
+			account = candidate
+			break
+		}
+	}
+	if index < 0 {
+		return fmt.Errorf("account %q not found", id)
+	}
+	if account.Controller {
+		return errors.New("controller account cannot be removed")
+	}
+
+	accountsBefore := slices.Clone(s.accounts)
+	ownersBefore := maps.Clone(s.owners)
+	keysBefore := maps.Clone(s.accountCreateKey)
+	archivePath := ""
+	if !samePath(account.CodexHome, s.primaryCodexHome) {
+		accountsRoot := filepath.Join(s.root, "accounts")
+		relativeHome, err := filepath.Rel(accountsRoot, account.CodexHome)
+		if err != nil || relativeHome == "." || relativeHome == ".." || strings.HasPrefix(relativeHome, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("refuse to archive account home outside managed accounts root: %q", account.CodexHome)
+		}
+		if _, err := os.Stat(account.CodexHome); err == nil {
+			removedRoot := filepath.Join(s.root, "removed-accounts")
+			if err := os.MkdirAll(removedRoot, 0o700); err != nil {
+				return fmt.Errorf("create removed account archive: %w", err)
+			}
+			archivePath = filepath.Join(removedRoot, fmt.Sprintf("%s-%d", account.ID, time.Now().UnixNano()))
+			if err := os.Rename(account.CodexHome, archivePath); err != nil {
+				return fmt.Errorf("archive removed account home: %w", err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect removed account home: %w", err)
+		}
+	}
+	s.accounts = append(s.accounts[:index], s.accounts[index+1:]...)
+	for threadID, accountID := range s.owners {
+		if accountID == id {
+			delete(s.owners, threadID)
+		}
+	}
+	for key, accountID := range s.accountCreateKey {
+		if accountID == id {
+			delete(s.accountCreateKey, key)
+		}
+	}
+	if err := s.saveLocked(); err != nil {
+		s.accounts = accountsBefore
+		s.owners = ownersBefore
+		s.accountCreateKey = keysBefore
+		if archivePath != "" {
+			_ = os.Rename(archivePath, account.CodexHome)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Store) UpdateAccount(id string, label *string, enabled *bool) (Account, error) {
@@ -268,9 +369,10 @@ func (s *Store) ThreadCounts() map[string]int {
 
 func (s *Store) saveLocked() error {
 	persisted := persistedState{
-		Version:     stateVersion,
-		Accounts:    s.accounts,
-		ThreadOwner: s.owners,
+		Version:           stateVersion,
+		Accounts:          s.accounts,
+		ThreadOwner:       s.owners,
+		AccountCreateKeys: s.accountCreateKey,
 	}
 	data, err := json.MarshalIndent(persisted, "", "  ")
 	if err != nil {

@@ -1,11 +1,112 @@
 package state
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestAddAccountIdempotentPersistsAcrossReopen(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	primary := filepath.Join(t.TempDir(), "primary")
+	store, err := Open(root, primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, created, err := store.AddAccountIdempotent("Work", "request-1")
+	if err != nil || !created {
+		t.Fatalf("first add = %#v, %v, %v", first, created, err)
+	}
+	reopened, err := Open(root, primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, created, err := reopened.AddAccountIdempotent("Different label", "request-1")
+	if err != nil || created {
+		t.Fatalf("replayed add = %#v, %v, %v", second, created, err)
+	}
+	if second.ID != first.ID || second.Label != "Work" {
+		t.Fatalf("replay created or changed account: first=%#v second=%#v", first, second)
+	}
+}
+
+func TestRemoveAccountArchivesHomeAndClearsReferences(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	store, err := Open(root, filepath.Join(t.TempDir(), "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, _, err := store.AddAccountIdempotent("Work", "request-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(account.CodexHome, "auth.json")
+	if err := os.WriteFile(marker, []byte("test credential marker"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetThreadOwner("thread-1", account.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RemoveAccount(account.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Account(account.ID); ok {
+		t.Fatal("removed account remains in state")
+	}
+	if _, ok := store.ThreadOwner("thread-1"); ok {
+		t.Fatal("removed account retained thread ownership")
+	}
+	archives, err := filepath.Glob(filepath.Join(root, "removed-accounts", account.ID+"-*", "auth.json"))
+	if err != nil || len(archives) != 1 {
+		t.Fatalf("recoverable account archive = %v, %v", archives, err)
+	}
+	replacement, created, err := store.AddAccountIdempotent("Replacement", "request-1")
+	if err != nil || !created || replacement.ID == account.ID {
+		t.Fatalf("create key was not released: %#v, %v, %v", replacement, created, err)
+	}
+}
+
+func TestRemoveAccountRejectsController(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "state"), filepath.Join(t.TempDir(), "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RemoveAccount("primary"); err == nil {
+		t.Fatal("controller removal unexpectedly succeeded")
+	}
+}
+
+func TestOpenAcceptsLegacyVersionOneWithoutCreateKeys(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	primary := filepath.Join(t.TempDir(), "primary")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := map[string]any{
+		"version": 1,
+		"accounts": []Account{{
+			ID: "primary", Label: "Primary", CodexHome: primary,
+			Enabled: true, Controller: true, CreatedAt: 1,
+		}},
+		"threadOwner": map[string]string{},
+	}
+	encoded, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "state.json"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(root, primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account, ok := store.Account("primary"); !ok || account.Label != "Primary" {
+		t.Fatalf("legacy account not loaded: %#v, %v", account, ok)
+	}
+}
 
 func TestStoreBootstrapsPrimaryAndPersistsThreadAffinity(t *testing.T) {
 	root := t.TempDir()
