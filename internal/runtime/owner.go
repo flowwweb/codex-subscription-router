@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -84,7 +86,7 @@ func (o *Owner) Receipt() Receipt              { return o.receipt }
 func (o *Owner) ControlListener() net.Listener { return o.controlListener }
 func (o *Owner) BridgeListener() net.Listener  { return o.bridgeListener }
 
-func (o *Owner) Publish(onShutdown func()) error {
+func (o *Owner) Publish(onShutdown func(), issueDashboardURL func() (string, error)) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/runtime/ready", func(response http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet {
@@ -98,6 +100,28 @@ func (o *Owner) Publish(onShutdown func()) error {
 		response.Header().Set("Content-Type", "application/json")
 		response.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(response).Encode(o.receipt)
+	})
+	mux.HandleFunc("/v1/runtime/dashboard-url", func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !o.authorized(request) {
+			http.Error(response, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if issueDashboardURL == nil {
+			http.Error(response, "dashboard unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		dashboardURL, err := issueDashboardURL()
+		if err != nil {
+			http.Error(response, "dashboard unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		response.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(response).Encode(map[string]string{"url": dashboardURL})
 	})
 	mux.HandleFunc("/v1/runtime/shutdown", func(response http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {
@@ -192,4 +216,43 @@ func Probe(ctx context.Context, receipt Receipt) error {
 		return errors.New("runtime readiness identity does not match receipt")
 	}
 	return nil
+}
+
+// RequestDashboardURL asks the exact runtime instance for a fresh one-use URL.
+// The URL is returned to the caller only and is never added to the receipt.
+func RequestDashboardURL(ctx context.Context, receipt Receipt) (string, error) {
+	if err := receipt.Validate(); err != nil {
+		return "", err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+receipt.Address+"/v1/runtime/dashboard-url", nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("X-Codex-Mux-Instance", receipt.Instance)
+	client := &http.Client{Timeout: 2 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("request dashboard URL: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("request dashboard URL: status %s", response.Status)
+	}
+	var result struct {
+		URL string `json:"url"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 8*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&result); err != nil {
+		return "", fmt.Errorf("decode dashboard URL: %w", err)
+	}
+	parsed, err := url.Parse(result.URL)
+	if err != nil || parsed.Scheme != "http" || parsed.Host != receipt.ControlAddress || parsed.User != nil || parsed.RawQuery != "" {
+		return "", errors.New("runtime returned an invalid dashboard URL")
+	}
+	fragment, err := url.ParseQuery(parsed.Fragment)
+	if err != nil || fragment.Get("bootstrap") == "" {
+		return "", errors.New("runtime returned a dashboard URL without a bootstrap nonce")
+	}
+	return result.URL, nil
 }

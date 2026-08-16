@@ -5,9 +5,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -93,7 +96,7 @@ func TestOwnerPublishesDynamicExactEndpointAndCleansUp(t *testing.T) {
 		}
 		seen[address] = struct{}{}
 	}
-	if err := owner.Publish(nil); err != nil {
+	if err := owner.Publish(nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	published, err := ReadReceipt(root)
@@ -121,6 +124,67 @@ func TestOwnerPublishesDynamicExactEndpointAndCleansUp(t *testing.T) {
 	}
 	if _, err := os.Stat(ReceiptPath(root)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("runtime receipt survived clean shutdown: %v", err)
+	}
+}
+
+func TestDashboardURLRequiresAuthenticationAndIsFresh(t *testing.T) {
+	root := t.TempDir()
+	owner, err := Acquire(root, "test-build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	receipt := owner.Receipt()
+	issued := 0
+	if err := owner.Publish(nil, func() (string, error) {
+		issued++
+		return "http://" + receipt.ControlAddress + "/#bootstrap=nonce-" + strconv.Itoa(issued), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	endpoint := "http://" + receipt.Address + "/v1/runtime/dashboard-url"
+	for _, instance := range []string{"", strings.Repeat("0", len(receipt.Instance))} {
+		request, err := http.NewRequest(http.MethodPost, endpoint, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if instance != "" {
+			request.Header.Set("X-Codex-Mux-Instance", instance)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated dashboard URL status = %d", response.StatusCode)
+		}
+	}
+	if issued != 0 {
+		t.Fatalf("unauthenticated requests issued %d dashboard URLs", issued)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	first, err := RequestDashboardURL(ctx, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := RequestDashboardURL(ctx, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second || issued != 2 {
+		t.Fatalf("dashboard URLs were not freshly issued: first=%q second=%q calls=%d", first, second, issued)
+	}
+	receiptData, err := os.ReadFile(ReceiptPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(receiptData, []byte("bootstrap")) || bytes.Contains(receiptData, []byte("nonce-")) {
+		t.Fatal("runtime receipt persisted dashboard bootstrap material")
 	}
 }
 

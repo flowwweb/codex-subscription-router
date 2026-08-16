@@ -37,6 +37,9 @@ func run() error {
 	if len(args) > 0 && args[0] == "daemon" {
 		return runDaemon(args[1:])
 	}
+	if len(args) == 1 && args[0] == "dashboard-url" {
+		return runDashboardURL()
+	}
 	if isInteractiveAppServer(args) {
 		return runBridge()
 	}
@@ -45,6 +48,28 @@ func run() error {
 		return err
 	}
 	return passthrough(realExecutable, args)
+}
+
+func runDashboardURL() error {
+	root, err := runtimeRoot()
+	if err != nil {
+		return err
+	}
+	receipt, err := muxruntime.ReadReceipt(root)
+	if err != nil {
+		return fmt.Errorf("router daemon is unavailable: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := muxruntime.Probe(ctx, receipt); err != nil {
+		return fmt.Errorf("router daemon receipt is stale or unhealthy: %w", err)
+	}
+	dashboardURL, err := muxruntime.RequestDashboardURL(ctx, receipt)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(os.Stdout, dashboardURL)
+	return err
 }
 
 func runtimeRoot() (string, error) {
@@ -163,7 +188,9 @@ func runDaemon(realArgs []string) error {
 			multiplexer.HandleClient(message)
 		})
 	}()
-	if err := owner.Publish(cancel); err != nil {
+	if err := owner.Publish(cancel, func() (string, error) {
+		return controlServer.IssueBootstrap("http://" + receipt.ControlAddress + "/")
+	}); err != nil {
 		return err
 	}
 	probeCtx, probeCancel := context.WithTimeout(ctx, 2*time.Second)
