@@ -29,6 +29,7 @@ foreach ($required in @(
     "CODEX_MUX_HOME",
     "primaryCodexHome",
     "Get-FileHash",
+    "Invoke-Icacls",
     "Assert-NoPathCollision",
     "source checkout",
     "router install",

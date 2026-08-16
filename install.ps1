@@ -128,11 +128,38 @@ function Resolve-CodexBackend {
     Fail "could not find a runnable Windows Codex backend; pass -CodexExecutable C:\path\to\codex.exe"
 }
 
+function Invoke-Icacls([string[]] $Arguments) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = @(& icacls.exe @Arguments 2>&1)
+        [ordered]@{
+            exitCode = $LASTEXITCODE
+            output = $output
+        }
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+}
+
 function Set-PrivateStateAcl([string] $Path) {
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    & icacls.exe $Path /inheritance:r /grant:r "${identity}:(OI)(CI)F" /T /C 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Fail "could not restrict router state permissions with icacls (exit $LASTEXITCODE)"
+    $rootResult = Invoke-Icacls @(
+        $Path,
+        "/inheritance:r",
+        "/grant:r",
+        "${identity}:(OI)(CI)F",
+        "/T",
+        "/C"
+    )
+    if ($rootResult.exitCode -ne 0) {
+        $unexpectedErrors = @($rootResult.output | ForEach-Object { [string]$_ } | Where-Object {
+            $_ -match "(?i)(access is denied|cannot open|invalid parameter|not enough|error)" -and
+            $_ -notmatch "(?i)system cannot find the path specified"
+        })
+        if ($unexpectedErrors.Count -gt 0) {
+            Fail "could not restrict router state permissions with icacls (exit $($rootResult.exitCode)): $($unexpectedErrors -join '; ')"
+        }
     }
     $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue)
     foreach ($file in $files) {
@@ -140,9 +167,15 @@ function Set-PrivateStateAcl([string] $Path) {
         if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
             continue
         }
-        & icacls.exe $filePath /inheritance:r /grant:r "${identity}:F" /C 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0 -and (Test-Path -LiteralPath $filePath -PathType Leaf)) {
-            Fail "could not restrict router file permissions with icacls (exit $LASTEXITCODE): $filePath"
+        $exitCode = Invoke-Icacls @(
+            $filePath,
+            "/inheritance:r",
+            "/grant:r",
+            "${identity}:F",
+            "/C"
+        )
+        if ($exitCode.exitCode -ne 0 -and (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+            Fail "could not restrict router file permissions with icacls (exit $($exitCode.exitCode)): $filePath"
         }
     }
 }
