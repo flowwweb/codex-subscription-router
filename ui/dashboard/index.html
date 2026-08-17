@@ -3,73 +3,98 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090a0d">
   <title>Codex Router</title>
+  <link rel="icon" type="image/png" href="/assets/flowwweb-icon.png">
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/app.js" defer></script>
 </head>
 <body>
+  <header class="topbar">
+    <span class="brand"><img class="brand-mark" src="/assets/flowwweb-icon.png" alt="">Codex Router</span>
+    <div class="top-actions">
+      <span id="health-badge" class="health" aria-live="polite">Starting</span>
+      <button id="open-settings" class="quiet" type="button">Settings</button>
+    </div>
+  </header>
+
   <main class="shell">
-    <nav class="product-bar" aria-label="Product">
-      <span class="brand"><img class="brand-mark" src="/assets/flowwweb-mark.svg" alt="">Codex Router</span>
-      <span class="local-label">Local only</span>
-    </nav>
-    <header class="status-card">
+    <div id="notice" class="notice" role="status" aria-live="polite" tabindex="-1" hidden></div>
+    <section class="router-summary" aria-labelledby="status-title">
       <div>
-        <p class="eyebrow">Subscription Router</p>
-        <h1 id="status-title">Starting your router…</h1>
-        <p id="status-detail">Checking your subscriptions. This usually takes a few seconds.</p>
+        <h1 id="status-title">Checking accounts…</h1>
+        <p id="status-detail">This will only take a moment.</p>
       </div>
-      <span id="health-badge" class="badge" aria-live="polite">Checking</span>
-    </header>
-
-    <section class="subscriptions" aria-labelledby="subscriptions-title">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Subscriptions</p>
-          <h2 id="subscriptions-title">Your ChatGPT subscriptions</h2>
-        </div>
-        <button id="connect" class="primary desktop-connect" data-connect type="button">Connect subscription</button>
-      </div>
-      <div id="notice" class="notice" role="status" aria-live="polite" tabindex="-1" hidden></div>
-      <div id="accounts" class="accounts" aria-busy="true"></div>
-      <details class="migration">
-        <summary>Use subscriptions already connected in codex-lb</summary>
-        <p>In codex-lb, export each account as Codex auth JSON. Pause codex-lb routing for those accounts before importing so only one app refreshes their sign-in.</p>
-        <p><a href="http://127.0.0.1:2455" target="_blank" rel="noreferrer">Open codex-lb</a></p>
-        <label class="file-label" for="codex-lb-files">Choose one or more exported JSON files</label>
-        <input id="codex-lb-files" type="file" accept="application/json,.json" multiple>
-        <label class="confirm-label"><input id="codex-lb-paused" type="checkbox"> I paused codex-lb routing for these accounts.</label>
-        <div id="migration-preview" class="migration-preview" aria-live="polite" hidden></div>
-        <button id="migrate-codex-lb" class="secondary" type="button">Review migration</button>
-      </details>
-      <button class="primary mobile-connect" data-connect type="button">Connect subscription</button>
     </section>
-
-    <aside class="constraint">
-      <strong>Windows app note</strong>
-      <p>This dashboard manages subscriptions for the standalone app-server router. The official Codex Windows app does not currently route through it.</p>
-    </aside>
-
-    <details class="technical">
-      <summary>Technical details</summary>
-      <p>Build: <code id="technical-build">Loading…</code></p>
-      <p>Router state: <code id="technical-state">Loading…</code></p>
-      <p>Primary account home: <code id="technical-primary">Loading…</code></p>
-      <p>Runs locally on this computer. Account credentials stay in these protected account homes.</p>
-    </details>
-  </main>
-  <template id="account-template">
-    <article class="account-card">
-      <div class="account-main">
-        <h3 class="account-name"></h3>
-        <p class="account-identity"></p>
-        <div class="usage"></div>
+    <section class="accounts-section" aria-labelledby="accounts-title">
+      <div class="section-heading">
+        <h2 id="accounts-title">Accounts</h2>
+        <button class="primary" data-connect type="button">Add account</button>
       </div>
-      <div class="account-actions">
-        <label class="toggle-label"><input class="enabled" type="checkbox"><span class="enabled-text">Included in routing</span></label>
-        <button class="rename secondary" type="button">Rename</button>
-        <button class="login secondary" type="button">Connect</button>
-        <button class="remove secondary" type="button" hidden>Remove</button>
+      <div id="accounts" class="accounts" aria-busy="true"></div>
+    </section>
+  </main>
+
+  <dialog id="login-dialog" class="dialog login-dialog" aria-labelledby="login-title" tabindex="-1">
+    <div class="dialog-head">
+      <h2 id="login-title">Connect with ChatGPT</h2>
+      <button id="close-login" class="icon-button" type="button" aria-label="Close sign-in">×</button>
+    </div>
+    <p id="login-instruction">Open ChatGPT and enter this code.</p>
+    <p id="login-code" class="device-code" aria-label="Verification code"></p>
+    <a id="login-link" class="primary action-link" target="_blank" rel="noopener noreferrer">Open ChatGPT</a>
+    <p id="login-status" class="waiting" aria-live="polite">Waiting for confirmation…</p>
+    <button id="cancel-login" class="quiet full-width" type="button">Cancel</button>
+  </dialog>
+
+  <dialog id="settings-dialog" class="dialog settings-dialog" aria-labelledby="settings-title" tabindex="-1">
+    <div class="dialog-head">
+      <h2 id="settings-title">Settings</h2>
+      <button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button>
+    </div>
+    <div id="settings-notice" class="notice" role="status" aria-live="polite" tabindex="-1" hidden></div>
+    <section class="settings-section" aria-labelledby="migration-title">
+      <h3 id="migration-title">Import from codex-lb</h3>
+      <p>Reuse accounts you already connected. Pause codex-lb for those accounts first so only one app refreshes their sign-in.</p>
+      <p><a href="http://127.0.0.1:2455" target="_blank" rel="noreferrer">Open codex-lb</a></p>
+      <label class="file-label" for="codex-lb-files">Choose exported auth files</label>
+      <input id="codex-lb-files" type="file" accept="application/json,.json" multiple>
+      <label class="confirm-label"><input id="codex-lb-paused" type="checkbox"> codex-lb is paused for these accounts</label>
+      <div id="migration-preview" class="migration-preview" aria-live="polite" hidden></div>
+      <button id="migrate-codex-lb" class="quiet full-width" type="button">Review import</button>
+    </section>
+    <details class="diagnostics">
+      <summary>About &amp; diagnostics</summary>
+      <p>Codex Router runs on this computer. Account credentials stay in protected local account homes.</p>
+      <p>The official Codex Windows app does not currently route through this standalone router.</p>
+      <dl>
+        <div><dt>Build</dt><dd><code id="technical-build">Loading…</code></dd></div>
+        <div><dt>State</dt><dd><code id="technical-state">Loading…</code></dd></div>
+        <div><dt>Primary account</dt><dd><code id="technical-primary">Loading…</code></dd></div>
+      </dl>
+    </details>
+  </dialog>
+
+  <template id="account-template">
+    <article class="account-row">
+      <div class="account-identity-block">
+        <div class="account-title-line">
+          <h3 class="account-name"></h3>
+          <span class="account-state"></span>
+        </div>
+        <p class="account-identity"></p>
+      </div>
+      <div class="usage"></div>
+      <div class="account-controls">
+        <button class="login quiet" type="button" hidden>Connect</button>
+        <details class="account-menu">
+          <summary aria-label="Account settings">•••</summary>
+          <div class="account-menu-panel">
+            <label class="toggle-label"><input class="enabled" type="checkbox" role="switch"><span class="enabled-text">Use this account</span></label>
+            <button class="rename menu-action" type="button">Rename</button>
+            <button class="remove menu-action danger" type="button" hidden>Remove account</button>
+          </div>
+        </details>
       </div>
     </article>
   </template>

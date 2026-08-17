@@ -8,7 +8,37 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/b-nnett/codex-subscription-router/internal/mux"
 )
+
+func TestPresentLoginOnlyReturnsUserCredentialAndTrustedOpenAIURL(t *testing.T) {
+	presentation := presentLogin(json.RawMessage(`{"userCode":"ABCD-EFGH","deviceCode":"private-polling-secret","verificationUrl":"https://auth.openai.com/codex/device"}`))
+	if presentation.UserCode != "ABCD-EFGH" || presentation.VerificationURL != "https://auth.openai.com/codex/device" {
+		t.Fatalf("unexpected login presentation: %#v", presentation)
+	}
+	encoded, err := json.Marshal(presentation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private-polling-secret") || strings.Contains(string(encoded), "deviceCode") {
+		t.Fatalf("public login response exposed provider polling credentials: %s", encoded)
+	}
+
+	untrusted := presentLogin(json.RawMessage(`{"user_code":"WXYZ-1234","verification_uri":"https://example.com/steal"}`))
+	if untrusted.UserCode != "WXYZ-1234" || untrusted.VerificationURL != "" {
+		t.Fatalf("untrusted login destination was not removed: %#v", untrusted)
+	}
+
+	event := presentEvent(mux.Event{Type: "account-login", Data: mux.LoginAttempt{ID: "login-1", Result: json.RawMessage(`{"deviceCode":"private-polling-secret"}`)}})
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(eventJSON), "private-polling-secret") || strings.Contains(string(eventJSON), "result") {
+		t.Fatalf("login event exposed provider result: %s", eventJSON)
+	}
+}
 
 const testHost = "127.0.0.1:48123"
 
@@ -188,7 +218,7 @@ func TestSessionAuthorizesSSEWithoutURLCredential(t *testing.T) {
 func TestDashboardUsesStrictSecurityHeaders(t *testing.T) {
 	server := New(testHost, "token", nil, false)
 	response := request(server, http.MethodGet, "/", "")
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Subscription Router") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Codex Router") {
 		t.Fatalf("dashboard status = %d", response.Code)
 	}
 	if !strings.Contains(response.Header().Get("Content-Security-Policy"), "script-src 'self'") {

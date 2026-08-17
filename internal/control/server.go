@@ -20,6 +20,95 @@ import (
 	"github.com/b-nnett/codex-subscription-router/ui/dashboard"
 )
 
+type publicLoginAttempt struct {
+	ID        string         `json:"id"`
+	AccountID string         `json:"accountId"`
+	Mode      string         `json:"mode"`
+	State     mux.LoginState `json:"state"`
+	Error     string         `json:"error,omitempty"`
+	StartedAt int64          `json:"startedAt"`
+	UpdatedAt int64          `json:"updatedAt"`
+	ExpiresAt int64          `json:"expiresAt"`
+}
+
+type loginPresentation struct {
+	UserCode        string `json:"userCode,omitempty"`
+	VerificationURL string `json:"verificationUrl,omitempty"`
+}
+
+func presentLoginAttempt(attempt mux.LoginAttempt) publicLoginAttempt {
+	return publicLoginAttempt{
+		ID: attempt.ID, AccountID: attempt.AccountID, Mode: attempt.Mode, State: attempt.State,
+		Error: attempt.Error, StartedAt: attempt.StartedAt, UpdatedAt: attempt.UpdatedAt, ExpiresAt: attempt.ExpiresAt,
+	}
+}
+
+func presentEvent(event mux.Event) mux.Event {
+	if event.Type != "account-login" {
+		return event
+	}
+	switch attempt := event.Data.(type) {
+	case mux.LoginAttempt:
+		event.Data = presentLoginAttempt(attempt)
+	case *mux.LoginAttempt:
+		if attempt != nil {
+			event.Data = presentLoginAttempt(*attempt)
+		}
+	}
+	return event
+}
+
+func presentLogin(result json.RawMessage) loginPresentation {
+	var provider struct {
+		UserCode                string `json:"userCode"`
+		UserCodeSnake           string `json:"user_code"`
+		VerificationURL         string `json:"verificationUrl"`
+		VerificationURLSnake    string `json:"verification_url"`
+		VerificationURI         string `json:"verificationUri"`
+		VerificationURISnake    string `json:"verification_uri"`
+		VerificationURIComplete string `json:"verificationUriComplete"`
+		VerificationCompleteRaw string `json:"verification_uri_complete"`
+		AuthURL                 string `json:"authUrl"`
+		AuthURLSnake            string `json:"auth_url"`
+	}
+	if json.Unmarshal(result, &provider) != nil {
+		return loginPresentation{}
+	}
+	code := provider.UserCode
+	if code == "" {
+		code = provider.UserCodeSnake
+	}
+	verificationURL := firstNonEmpty(
+		provider.VerificationURIComplete, provider.VerificationCompleteRaw,
+		provider.VerificationURL, provider.VerificationURLSnake,
+		provider.VerificationURI, provider.VerificationURISnake,
+		provider.AuthURL, provider.AuthURLSnake,
+	)
+	if !trustedOpenAIVerificationURL(verificationURL) {
+		verificationURL = ""
+	}
+	return loginPresentation{UserCode: code, VerificationURL: verificationURL}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func trustedOpenAIVerificationURL(value string) bool {
+	destination, err := url.ParseRequestURI(value)
+	if err != nil || destination.Scheme != "https" || destination.User != nil {
+		return false
+	}
+	hostname := strings.ToLower(destination.Hostname())
+	return hostname == "chatgpt.com" || strings.HasSuffix(hostname, ".chatgpt.com") ||
+		hostname == "auth.openai.com" || strings.HasSuffix(hostname, ".auth.openai.com")
+}
+
 const sessionCookieName = "codex_mux_session"
 
 type Options struct {
@@ -407,11 +496,7 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-		var login any
-		if json.Unmarshal(attempt.Result, &login) != nil {
-			login = map[string]any{}
-		}
-		writeJSON(response, http.StatusOK, map[string]any{"attempt": attempt, "login": login})
+		writeJSON(response, http.StatusOK, map[string]any{"attempt": presentLoginAttempt(attempt), "login": presentLogin(attempt.Result)})
 	case "logout":
 		if err := s.mux.Logout(ctx, accountID); err != nil {
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -441,7 +526,7 @@ func (s *Server) loginAttemptAction(response http.ResponseWriter, request *http.
 			writeJSON(response, http.StatusNotFound, map[string]any{"error": err.Error()})
 			return
 		}
-		writeJSON(response, http.StatusOK, map[string]any{"attempt": attempt})
+		writeJSON(response, http.StatusOK, map[string]any{"attempt": presentLoginAttempt(attempt)})
 	case len(parts) == 2 && parts[1] == "cancel" && request.Method == http.MethodPost:
 		ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
 		defer cancel()
@@ -450,7 +535,7 @@ func (s *Server) loginAttemptAction(response http.ResponseWriter, request *http.
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-		writeJSON(response, http.StatusOK, map[string]any{"attempt": attempt})
+		writeJSON(response, http.StatusOK, map[string]any{"attempt": presentLoginAttempt(attempt)})
 	default:
 		methodNotAllowed(response)
 	}
@@ -485,7 +570,7 @@ func (s *Server) events(response http.ResponseWriter, request *http.Request) {
 			if !open {
 				return
 			}
-			encoded, _ := json.Marshal(event)
+			encoded, _ := json.Marshal(presentEvent(event))
 			_, _ = fmt.Fprintf(response, "data: %s\n\n", encoded)
 			flusher.Flush()
 		}
