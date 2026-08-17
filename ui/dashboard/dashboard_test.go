@@ -17,10 +17,15 @@ func TestStaticDashboardContracts(t *testing.T) {
 		"Included in routing",
 		"migration-preview",
 		"technical-build",
+		"Codex Router",
+		"flowwweb-mark.svg",
 	} {
 		if !strings.Contains(html, text) {
 			t.Errorf("index is missing %q", text)
 		}
+	}
+	if _, contentType, ok := Asset("flowwweb-mark.svg"); !ok || contentType != "image/svg+xml" {
+		t.Fatalf("Flowwweb mark asset is unavailable: ok=%v type=%q", ok, contentType)
 	}
 	for _, contract := range []string{"min-width: 0", "min-height: 44px", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
 		if !strings.Contains(css, contract) {

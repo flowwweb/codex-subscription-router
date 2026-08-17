@@ -36,8 +36,7 @@ button:focus-visible, summary:focus-visible, input:focus-visible, a:focus-visibl
 .shell { width: min(100% - 2.5rem, 70rem); margin: 0 auto; padding: 1.5rem 0 3rem; display: grid; gap: 1.25rem; }
 .product-bar { display: flex; align-items: center; justify-content: space-between; min-height: 3.5rem; }
 .brand { display: inline-flex; align-items: center; gap: .7rem; font-size: .95rem; font-weight: 700; letter-spacing: -.01em; }
-.brand-mark { width: 1.9rem; height: 1.9rem; display: grid; place-items: center; color: #9c8cff; }
-.brand-mark::before { content: "∿"; font: 700 2rem/1 ui-sans-serif, sans-serif; transform: rotate(-8deg); }
+.brand-mark { width: 1.9rem; height: 1.9rem; display: block; }
 .local-label { display: inline-flex; align-items: center; gap: .45rem; color: #a5a7b1; font-size: .8rem; }
 .local-label::before { content: ""; width: .45rem; height: .45rem; border-radius: 50%; background: #50d890; box-shadow: 0 0 0 .25rem rgba(80,216,144,.08); }
 .status-card {
@@ -113,10 +112,14 @@ details[open] > summary::after { transform: rotate(-90deg); }
 code { user-select: all; overflow-wrap: anywhere; color: #b9afff; }
 [hidden] { display: none !important; }
 @media (max-width: 44rem) {
-  .shell { width: min(100% - 1.5rem, 70rem); padding-top: .65rem; }
+  .shell { width: min(100% - 1.5rem, 70rem); padding: .65rem 0 7rem; }
   .status-card { min-height: 12rem; padding: 2.2rem 0 1.75rem; align-items: flex-start; flex-direction: column; gap: 1.25rem; }
   h1 { font-size: clamp(2.2rem, 13vw, 3.5rem); }
   .section-heading, .account-card { align-items: stretch; flex-direction: column; }
+  .section-heading .primary { position: fixed; z-index: 5; inset: auto .75rem .75rem; width: calc(100% - 1.5rem); min-height: 3.5rem; }
+  .accounts { gap: .75rem; border: 0; }
+  .account-card { min-height: 0; padding: 1.15rem; border: 1px solid #292b33; border-radius: 1rem; background: #0e0f13; }
+  .account-card:first-child { border-top: 1px solid #292b33; }
   .account-actions { justify-content: flex-start; }
   .primary { width: 100%; }
   .usage { grid-template-columns: 1fr; }
