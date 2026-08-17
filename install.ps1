@@ -365,6 +365,21 @@ if (-not $NoLaunch) {
     $taskService.GetFolder("\").RegisterTaskDefinition("Codex Subscription Router", $taskDefinition, 6, $identity, $null, 3, $null) | Out-Null
 
     $dashboardUrl = & $dashboardScript -InstallRoot $installRoot | Select-Object -Last 1
+
+    $retainedVersions = @((Get-NormalizedPath $versionRoot))
+    if ($previousConfigObject -and -not [string]::IsNullOrWhiteSpace([string]$previousConfigObject.muxExecutable)) {
+        $previousVersionRoot = Get-NormalizedPath (Split-Path -Parent ([string]$previousConfigObject.muxExecutable))
+        if (Test-PathWithin $previousVersionRoot $versionsRoot) { $retainedVersions += $previousVersionRoot }
+    }
+    Get-ChildItem -LiteralPath $versionsRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object {
+            $candidateVersion = Get-NormalizedPath $_.FullName
+            (Test-PathWithin $candidateVersion $versionsRoot) -and
+                $candidateVersion -notin $retainedVersions -and
+                (Test-Path -LiteralPath (Join-Path $candidateVersion "codex-mux.exe") -PathType Leaf)
+        } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+
     Write-Output (ConvertTo-Json -Compress -InputObject ([ordered]@{
         routerPid = [int]$runtimeReceipt.pid
         routerBuild = [string]$runtimeReceipt.build
