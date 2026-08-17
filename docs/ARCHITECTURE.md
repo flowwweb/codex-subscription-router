@@ -48,10 +48,14 @@ one Apple team. The helper uses a separate bundle identity and socket, avoiding
 the official app's privacy grants and app-group container.
 
 On Windows, the installer leaves the official Windows package in place and
-installs a standalone app-server command. `CODEX_MUX_REAL_CODEX` points at the
-user-local backend used by the official Windows app (or an explicitly supplied
-backend), while `CODEX_MUX_HOME` and `CODEX_HOME` point to router-owned state
-and primary-account directories. The protected package's bundled
+installs one per-user daemon plus a thin app-server stdio bridge. The daemon
+holds an OS-level single-owner lease, owns every account child, binds dynamic
+numeric-loopback readiness/control/bridge endpoints, and writes their PID,
+build, instance, and addresses to a protected atomic runtime receipt.
+`CODEX_MUX_REAL_CODEX` points at the user-local backend used by the official
+Windows app (or an explicitly supplied backend), while `CODEX_MUX_HOME` and
+`CODEX_HOME` point to router-owned state and primary-account directories. The
+protected package's bundled
 `resources\\codex.exe` is retained for integrity verification but is not
 assumed runnable outside the package identity. The current Windows GUI build
 does not consume the router override for its local app-server, so this adapter
@@ -66,8 +70,16 @@ before forwarding the strict RPC request to the chosen child.
 
 ## Control API
 
-The renderer talks to a loopback-only HTTP service on port 48123. All private
-routes require a random 256-bit token. CORS is limited to the copied app's
-`app://-` origin. The service exposes account metadata, aggregated usage and
-profile data, thread ownership, login/logout actions, and an authenticated SSE
-event stream; it never returns OAuth tokens.
+The macOS renderer retains its loopback token contract. Windows uses the
+daemon's dynamic control address. Embedded dashboard assets are served
+same-origin; a fresh fragment nonce is exchanged once for an HttpOnly,
+SameSite=Strict browser session. Mutations require CSRF, Host and Origin are
+restricted to the exact numeric-loopback listener, and SSE uses the session
+without a URL credential. The service exposes account metadata, usage, thread
+ownership, explicit login states, import/logout/remove actions, and events; it
+never returns OAuth tokens.
+
+The Windows installer stages a versioned binary, verifies the selected backend
+and mux hashes, switches an atomic current configuration, waits for exact-build
+daemon readiness, and rolls configuration back when readiness fails. A
+least-privilege per-user logon task starts the daemon after sign-in.

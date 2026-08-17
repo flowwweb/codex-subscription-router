@@ -3,7 +3,9 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot ".."))
 $files = @(
     (Join-Path $root "install.ps1"),
-    (Join-Path $root "scripts\windows\launch-router.ps1")
+    (Join-Path $root "scripts\windows\launch-router.ps1"),
+    (Join-Path $root "scripts\windows\start-router.ps1"),
+    (Join-Path $root "scripts\windows\open-dashboard.ps1")
 )
 
 foreach ($file in $files) {
@@ -19,10 +21,16 @@ $launcher = Get-Content -LiteralPath (Join-Path $root "scripts\windows\launch-ro
 if ($launcher -notmatch "launch-router\.ps1") {
     throw "Windows command launcher does not invoke launch-router.ps1"
 }
+$dashboardLauncher = Get-Content -LiteralPath (Join-Path $root "scripts\windows\open-dashboard.cmd") -Raw
+if ($dashboardLauncher -notmatch "open-dashboard\.ps1") {
+    throw "Windows dashboard launcher does not invoke open-dashboard.ps1"
+}
 
 $installer = Get-Content -LiteralPath (Join-Path $root "install.ps1") -Raw
 $launcherScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\launch-router.ps1") -Raw
-$contracts = "$installer`n$launcherScript"
+$startScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\start-router.ps1") -Raw
+$dashboardScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\open-dashboard.ps1") -Raw
+$contracts = "$installer`n$launcherScript`n$startScript`n$dashboardScript"
 foreach ($required in @(
     "codexBackendExecutable",
     "CODEX_MUX_REAL_CODEX",
@@ -36,7 +44,13 @@ foreach ($required in @(
     "router install",
     "Test-PathWithin",
     "%USERPROFILE%\\.codex",
-    "ReparsePoint"
+    "ReparsePoint",
+    "runtime.json",
+    "dashboard-url",
+    "Schedule.Service",
+    "buildId",
+    "muxSha256",
+    "WindowStyle Hidden"
 )) {
     if ($contracts -notmatch [regex]::Escape($required)) {
         throw "Windows installer is missing required contract: $required"

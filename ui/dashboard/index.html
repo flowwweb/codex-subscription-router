@@ -28,6 +28,15 @@
       </div>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
       <div id="accounts" class="accounts" aria-busy="true"></div>
+      <details class="migration">
+        <summary>Use subscriptions already connected in codex-lb</summary>
+        <p>In codex-lb, export each account as Codex auth JSON. Pause codex-lb routing for those accounts before importing so only one app refreshes their sign-in.</p>
+        <p><a href="http://127.0.0.1:2455" target="_blank" rel="noreferrer">Open codex-lb</a></p>
+        <label class="file-label" for="codex-lb-files">Choose one or more exported JSON files</label>
+        <input id="codex-lb-files" type="file" accept="application/json,.json" multiple>
+        <label class="confirm-label"><input id="codex-lb-paused" type="checkbox"> I paused codex-lb routing for these accounts.</label>
+        <button id="migrate-codex-lb" class="secondary" type="button">Import subscriptions</button>
+      </details>
     </section>
 
     <aside class="constraint">
@@ -51,6 +60,7 @@
         <label class="toggle-label"><input class="enabled" type="checkbox"><span></span></label>
         <button class="rename secondary" type="button">Rename</button>
         <button class="login secondary" type="button">Connect</button>
+        <button class="remove secondary" type="button" hidden>Remove</button>
       </div>
     </article>
   </template>

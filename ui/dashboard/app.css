@@ -7,7 +7,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #e5eee7 0, #f3f5f1 28rem); }
 button, input { font: inherit; }
-button, summary, input[type="checkbox"] { min-height: 44px; }
+button, summary, input, .file-label, .confirm-label { min-height: 44px; }
 button { border: 1px solid #1f4838; border-radius: .7rem; padding: .65rem 1rem; cursor: pointer; }
 button:focus-visible, summary:focus-visible, input:focus-visible { outline: 3px solid #ff9f1c; outline-offset: 3px; }
 .shell { width: min(100% - 2rem, 56rem); margin: 0 auto; padding: 3rem 0; display: grid; gap: 1.25rem; }
@@ -32,6 +32,11 @@ p { margin: .45rem 0 0; line-height: 1.55; }
 .toggle-label { display: inline-flex; align-items: center; gap: .5rem; min-height: 44px; }
 .toggle-label input { width: 1.25rem; height: 1.25rem; }
 .notice { margin-top: 1rem; border-left: 4px solid #cc7612; background: #fff2d9; padding: .8rem 1rem; border-radius: .4rem; }
+.migration { margin-top: 1rem; box-shadow: none; }
+.migration input[type="file"] { display: block; width: 100%; margin: .5rem 0; padding: .55rem; border: 1px solid #8b9991; border-radius: .5rem; }
+.file-label { display: flex; align-items: center; margin-top: .75rem; font-weight: 650; }
+.confirm-label { display: flex; align-items: center; gap: .65rem; margin: .5rem 0; }
+.confirm-label input { width: 1.25rem; height: 1.25rem; flex: 0 0 auto; }
 .constraint { border-left: 4px solid #5275a5; }
 summary { display: flex; align-items: center; cursor: pointer; font-weight: 700; }
 .empty { padding: 1rem 0 .25rem; }

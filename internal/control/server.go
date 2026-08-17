@@ -77,6 +77,7 @@ func NewWithOptions(address, token string, multiplexer *mux.Multiplexer, uiTests
 	router.HandleFunc("/v1/health", server.health)
 	router.HandleFunc("/v1/accounts", server.accounts)
 	router.HandleFunc("/v1/accounts/", server.accountAction)
+	router.HandleFunc("/v1/login-attempts/", server.loginAttemptAction)
 	router.HandleFunc("/v1/thread-account", server.threadAccount)
 	router.HandleFunc("/v1/profile/combined", server.combinedProfile)
 	router.HandleFunc("/v1/events", server.events)
@@ -257,7 +258,8 @@ func (s *Server) accounts(response http.ResponseWriter, request *http.Request) {
 		writeJSON(response, http.StatusOK, map[string]any{"accounts": s.mux.Accounts(ctx)})
 	case http.MethodPost:
 		var input struct {
-			Label string `json:"label"`
+			Label          string `json:"label"`
+			IdempotencyKey string `json:"idempotencyKey"`
 		}
 		if err := decodeJSON(request, &input); err != nil {
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -265,7 +267,13 @@ func (s *Server) accounts(response http.ResponseWriter, request *http.Request) {
 		}
 		ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
 		defer cancel()
-		account, err := s.mux.AddAccount(ctx, input.Label)
+		var account mux.AccountSnapshot
+		var err error
+		if input.IdempotencyKey == "" {
+			account, err = s.mux.AddAccount(ctx, input.Label)
+		} else {
+			account, err = s.mux.AddAccountIdempotent(ctx, input.Label, input.IdempotencyKey)
+		}
 		if err != nil {
 			writeJSON(response, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
@@ -308,6 +316,31 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 		writeJSON(response, http.StatusOK, map[string]any{"account": account})
 		return
 	}
+	if len(parts) == 1 && request.Method == http.MethodDelete {
+		if err := s.mux.RemoveAccount(accountID); err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"removed": true})
+		return
+	}
+	if len(parts) == 3 && parts[1] == "import" && parts[2] == "codex-lb" && request.Method == http.MethodPost {
+		var input struct {
+			Export       json.RawMessage `json:"export"`
+			SourcePaused bool            `json:"sourcePaused"`
+		}
+		if err := decodeJSON(request, &input); err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		result, err := s.mux.ImportCodexLBExport(ctx, accountID, input.Export, input.SourcePaused)
+		if err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(response, http.StatusOK, result)
+		return
+	}
 	if len(parts) == 2 && parts[1] == "rate-limit-resets" && request.Method == http.MethodGet {
 		result, err := s.mux.RateLimitResetCredits(ctx, accountID)
 		if err != nil {
@@ -341,22 +374,31 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 	switch parts[1] {
 	case "login":
 		var input struct {
-			Mode string `json:"mode"`
+			Mode           string `json:"mode"`
+			IdempotencyKey string `json:"idempotencyKey"`
 		}
 		if err := decodeJSON(request, &input); err != nil {
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-		result, err := s.mux.StartLogin(ctx, accountID, input.Mode)
+		var attempt mux.LoginAttempt
+		var err error
+		if input.IdempotencyKey == "" {
+			var result json.RawMessage
+			result, err = s.mux.StartLogin(ctx, accountID, input.Mode)
+			attempt = mux.LoginAttempt{AccountID: accountID, Mode: input.Mode, State: mux.LoginPending, Result: result}
+		} else {
+			attempt, err = s.mux.StartLoginAttempt(ctx, accountID, input.Mode, input.IdempotencyKey)
+		}
 		if err != nil {
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
 		var login any
-		if json.Unmarshal(result, &login) != nil {
+		if json.Unmarshal(attempt.Result, &login) != nil {
 			login = map[string]any{}
 		}
-		writeJSON(response, http.StatusOK, map[string]any{"login": login})
+		writeJSON(response, http.StatusOK, map[string]any{"attempt": attempt, "login": login})
 	case "logout":
 		if err := s.mux.Logout(ctx, accountID); err != nil {
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -365,6 +407,39 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 		writeJSON(response, http.StatusOK, map[string]any{"ok": true})
 	default:
 		http.NotFound(response, request)
+	}
+}
+
+func (s *Server) loginAttemptAction(response http.ResponseWriter, request *http.Request) {
+	if !s.authorized(request) || (request.Method != http.MethodGet && !s.csrfAuthorized(request)) {
+		writeJSON(response, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	remainder := strings.TrimPrefix(request.URL.Path, "/v1/login-attempts/")
+	parts := strings.Split(strings.Trim(remainder, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(response, request)
+		return
+	}
+	switch {
+	case len(parts) == 1 && request.Method == http.MethodGet:
+		attempt, err := s.mux.LoginStatus(parts[0])
+		if err != nil {
+			writeJSON(response, http.StatusNotFound, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"attempt": attempt})
+	case len(parts) == 2 && parts[1] == "cancel" && request.Method == http.MethodPost:
+		ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
+		defer cancel()
+		attempt, err := s.mux.CancelLogin(ctx, parts[0])
+		if err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"attempt": attempt})
+	default:
+		methodNotAllowed(response)
 	}
 }
 

@@ -204,31 +204,56 @@ $asar = Join-Path $officialRoot "resources\app.asar"
 $beforeAsarHash = (Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash
 $beforeCodexHash = (Get-FileHash -LiteralPath $officialCodex -Algorithm SHA256).Hash
 $beforeBackendHash = (Get-FileHash -LiteralPath $codexBackend -Algorithm SHA256).Hash
-$muxExecutable = Join-Path $installRoot "codex-mux.exe"
 $stateRoot = Join-Path $installRoot "state"
 $primaryCodexHome = Join-Path $installRoot "primary-codex-home"
+$versionsRoot = Join-Path $installRoot "versions"
+$sourceRevision = $null
+if (Get-Command git.exe -ErrorAction SilentlyContinue) {
+    $sourceRevision = (& git.exe -C $sourceRoot rev-parse --short=12 HEAD 2>$null | Select-Object -First 1)
+}
+if ([string]::IsNullOrWhiteSpace($sourceRevision)) { $sourceRevision = "source" }
+$buildId = "{0}-{1}" -f $sourceRevision.Trim(), [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
+$stagingRoot = Join-Path $versionsRoot (".staging-{0}" -f [Guid]::NewGuid().ToString("N"))
+$versionRoot = Join-Path $versionsRoot $buildId
+$stagedMuxExecutable = Join-Path $stagingRoot "codex-mux.exe"
+$muxExecutable = Join-Path $versionRoot "codex-mux.exe"
 
-New-Item -ItemType Directory -Force -Path $installRoot,$stateRoot,$primaryCodexHome | Out-Null
+New-Item -ItemType Directory -Force -Path $installRoot,$stateRoot,$primaryCodexHome,$versionsRoot,$stagingRoot | Out-Null
 
 Push-Location $sourceRoot
 try {
-    & go.exe build -trimpath -ldflags "-s -w" -o $muxExecutable ./cmd/codex-mux
+    & go.exe build -trimpath -ldflags "-s -w -X main.buildID=$buildId" -o $stagedMuxExecutable ./cmd/codex-mux
     if ($LASTEXITCODE -ne 0) {
         Fail "Go multiplexer build failed"
     }
 } finally {
     Pop-Location
 }
+if (Test-Path -LiteralPath $versionRoot) { Fail "version directory already exists: $versionRoot" }
+Move-Item -LiteralPath $stagingRoot -Destination $versionRoot
+$muxHash = (Get-FileHash -LiteralPath $muxExecutable -Algorithm SHA256).Hash
 
-Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\launch-router.ps1") -Destination (Join-Path $installRoot "launch-router.ps1") -Force
-Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\launch-router.cmd") -Destination (Join-Path $installRoot "Codex Subscription Router.cmd") -Force
+foreach ($script in @(
+    @{ Source = "scripts\windows\launch-router.ps1"; Destination = "launch-router.ps1" },
+    @{ Source = "scripts\windows\launch-router.cmd"; Destination = "Codex Subscription Router.cmd" },
+    @{ Source = "scripts\windows\start-router.ps1"; Destination = "start-router.ps1" },
+    @{ Source = "scripts\windows\open-dashboard.ps1"; Destination = "open-dashboard.ps1" },
+    @{ Source = "scripts\windows\open-dashboard.cmd"; Destination = "Open Subscription Router.cmd" }
+)) {
+    $destination = Join-Path $installRoot $script.Destination
+    $temporary = $destination + ".new"
+    Copy-Item -LiteralPath (Join-Path $sourceRoot $script.Source) -Destination $temporary -Force
+    Move-Item -LiteralPath $temporary -Destination $destination -Force
+}
 
 $config = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
+    buildId = $buildId
     officialExecutable = $official
     officialCodexExecutable = $officialCodex
     codexBackendExecutable = $codexBackend
     muxExecutable = $muxExecutable
+    muxSha256 = $muxHash
     stateRoot = $stateRoot
     primaryCodexHome = $primaryCodexHome
     officialVersion = (Get-Item -LiteralPath $official).VersionInfo.ProductVersion
@@ -237,7 +262,26 @@ $config = [ordered]@{
     codexBackendSha256 = $beforeBackendHash
 }
 $configPath = Join-Path $installRoot "router-config.json"
-$config | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
+$previousConfig = $null
+$previousConfigObject = $null
+if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+    $previousConfig = Get-Content -LiteralPath $configPath -Raw
+    try { $previousConfigObject = $previousConfig | ConvertFrom-Json } catch {}
+}
+if ($previousConfigObject -and [int]$previousConfigObject.schemaVersion -lt 2 -and -not [string]::IsNullOrWhiteSpace([string]$previousConfigObject.muxExecutable)) {
+    $legacyMux = Get-NormalizedPath ([string]$previousConfigObject.muxExecutable)
+    if ((Test-PathWithin $legacyMux $normalizedInstallRoot) -and (Split-Path -Leaf $legacyMux) -eq "codex-mux.exe") {
+        Get-CimInstance Win32_Process -Filter "Name = 'codex-mux.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.ExecutablePath -and (Get-NormalizedPath $_.ExecutablePath).Equals($legacyMux, [System.StringComparison]::OrdinalIgnoreCase) } |
+            ForEach-Object {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop
+                Wait-Process -Id $_.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+            }
+    }
+}
+$configTemporary = $configPath + ".new"
+$config | ConvertTo-Json | Set-Content -LiteralPath $configTemporary -Encoding UTF8
+Move-Item -LiteralPath $configTemporary -Destination $configPath -Force
 Set-PrivateStateAcl $stateRoot
 Set-PrivateStateAcl $primaryCodexHome
 
@@ -253,6 +297,8 @@ $stateReceipt = [ordered]@{
     officialCodexExecutable = $officialCodex
     codexBackendExecutable = $codexBackend
     muxExecutable = $muxExecutable
+    muxSha256 = $muxHash
+    buildId = $buildId
     stateRoot = $stateRoot
     primaryCodexHome = $primaryCodexHome
     officialAppAsarSha256 = $afterAsarHash
@@ -260,19 +306,50 @@ $stateReceipt = [ordered]@{
     codexBackendSha256 = $beforeBackendHash
     existingUserCodexPath = Join-Path $env:USERPROFILE ".codex"
     launcher = Join-Path $installRoot "Codex Subscription Router.cmd"
+    dashboardLauncher = Join-Path $installRoot "Open Subscription Router.cmd"
 }
 Write-Output (ConvertTo-Json -Depth 3 $stateReceipt)
 
 if (-not $NoLaunch) {
-    $env:CODEX_MUX_REAL_CODEX = $codexBackend
-    $env:CODEX_MUX_HOME = $stateRoot
-    $env:CODEX_HOME = $primaryCodexHome
-    $env:CODEX_SQLITE_HOME = $primaryCodexHome
-    $routerProcess = Start-Process -FilePath $muxExecutable -ArgumentList @("-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled") -WorkingDirectory $installRoot -PassThru -WindowStyle Hidden
+    try {
+        $runtimeReceipt = & (Join-Path $installRoot "start-router.ps1") | Select-Object -Last 1 | ConvertFrom-Json
+    } catch {
+        if ($previousConfig) {
+            $previousConfig | Set-Content -LiteralPath $configPath -Encoding UTF8
+            try {
+                $previous = $previousConfig | ConvertFrom-Json
+                if ([int]$previous.schemaVersion -ge 2) { & (Join-Path $installRoot "start-router.ps1") | Out-Null }
+            } catch {}
+        }
+        Fail "new router failed readiness and configuration was rolled back: $($_.Exception.Message)"
+    }
+
+    $taskService = New-Object -ComObject "Schedule.Service"
+    $taskService.Connect()
+    $taskDefinition = $taskService.NewTask(0)
+    $taskDefinition.RegistrationInfo.Description = "Starts the local Codex Subscription Router daemon when this user signs in."
+    $taskDefinition.Settings.Enabled = $true
+    $taskDefinition.Settings.StartWhenAvailable = $true
+    $taskDefinition.Settings.ExecutionTimeLimit = "PT0S"
+    $taskDefinition.Settings.MultipleInstances = 2
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $taskDefinition.Principal.UserId = $identity
+    $taskDefinition.Principal.LogonType = 3
+    $taskDefinition.Principal.RunLevel = 0
+    $trigger = $taskDefinition.Triggers.Create(9)
+    $trigger.UserId = $identity
+    $action = $taskDefinition.Actions.Create(0)
+    $action.Path = Join-Path $PSHOME "powershell.exe"
+    $action.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $installRoot 'start-router.ps1')`""
+    $action.WorkingDirectory = $installRoot
+    $taskService.GetFolder("\").RegisterTaskDefinition("Codex Subscription Router", $taskDefinition, 6, $identity, $null, 3, $null) | Out-Null
+
+    $dashboardUrl = & (Join-Path $installRoot "open-dashboard.ps1") | Select-Object -Last 1
     Write-Output (ConvertTo-Json -Compress -InputObject ([ordered]@{
-        routerPid = $routerProcess.Id
-        routerExecutable = $muxExecutable
-        stateRoot = $stateRoot
-        primaryCodexHome = $primaryCodexHome
+        routerPid = [int]$runtimeReceipt.pid
+        routerBuild = [string]$runtimeReceipt.build
+        controlAddress = [string]$runtimeReceipt.controlAddress
+        dashboardUrl = [string]$dashboardUrl
+        launchAtSignIn = $true
     }))
 }

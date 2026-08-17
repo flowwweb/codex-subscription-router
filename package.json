@@ -1,16 +1,16 @@
 {
   "name": "codex-subscription-router-patcher",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Build tooling for the independent Codex Subscription Router macOS app patch",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/b-nnett/codex-subscription-router.git"
+    "url": "git+https://github.com/flowwweb/codex-subscription-router.git"
   },
-  "homepage": "https://github.com/b-nnett/codex-subscription-router#readme",
+  "homepage": "https://github.com/flowwweb/codex-subscription-router#readme",
   "bugs": {
-    "url": "https://github.com/b-nnett/codex-subscription-router/issues"
+    "url": "https://github.com/flowwweb/codex-subscription-router/issues"
   },
   "engines": {
     "node": ">=22.12"
@@ -18,7 +18,7 @@
   "scripts": {
     "check": "npm run check:go && npm run check:js && npm run check:python && npm run check:shell",
     "check:go": "go test ./... && go vet ./...",
-    "check:js": "node --check ui/account-menu.js && node --check ui/thread-subscription.js && node --check ui/ui-test-bridge.cjs",
+    "check:js": "node --check ui/account-menu.js && node --check ui/thread-subscription.js && node --check ui/ui-test-bridge.cjs && node --check ui/dashboard/app.js",
     "check:python": "node scripts/run_python.mjs -m py_compile scripts/patch_app.py scripts/check_release.py",
     "check:shell": "bash -n install.sh",
     "check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_windows.ps1",

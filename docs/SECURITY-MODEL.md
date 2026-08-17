@@ -5,7 +5,9 @@
 - The official ChatGPT app is trusted build input and remains unchanged.
 - The patcher has local filesystem and code-signing access by design.
 - Each real Codex child is trusted with only its assigned account home.
-- The injected renderer is trusted with the loopback control token.
+- The injected macOS renderer is trusted with the loopback control token.
+- The Windows dashboard receives only a process-local browser session and CSRF
+  value after one-use bootstrap; it never receives the durable control token.
 - Other local users and remote origins are outside the control API boundary.
 - Processes running as the same macOS user are not considered isolated from
   one another; they can already read that user's app data subject to macOS
@@ -20,8 +22,16 @@ not log or return tokens. State persisted by the mux contains account paths,
 labels, enabled state, and thread ownership only.
 
 The state root is mode `0700`; state, config, and control-token files are mode
-`0600`. Existing control tokens are validated as 256-bit hexadecimal values and
-their permissions are repaired on startup.
+`0600`. On Windows, state ACLs are replaced and verified so only the current
+user and SYSTEM retain access, including after atomic rewrites. Existing
+control tokens are validated as 256-bit hexadecimal values and their
+permissions are repaired on startup.
+
+codex-lb migration consumes its authenticated canonical Codex auth export. It
+does not open the codex-lb database or encryption key. Existing destination
+auth is backed up privately, and migration requires confirmation that codex-lb
+is paused for those accounts so two products do not race refresh-token
+rotation.
 
 Plugin and MCP configuration is deliberately synchronized from the Primary
 account so installed definitions remain consistent. Inline environment values
@@ -31,9 +41,11 @@ shared plugin configuration.
 
 ## Network
 
-The control server binds to `127.0.0.1`. Private endpoints require the token
-embedded into the independently built local renderer. Profile images must use
-HTTPS. Response sizes and JSON request bodies are bounded.
+The control server binds to a dynamic numeric `127.0.0.1` endpoint. The exact
+address lives in an owner-only runtime receipt. Unexpected Host and Origin
+values, cross-origin preflights, query-token authentication, non-JSON mutation
+bodies, bootstrap replay, and missing CSRF are rejected. Profile images must
+use HTTPS. Response sizes and JSON request bodies are bounded.
 
 The project itself does not provide a telemetry or update endpoint. Network
 traffic beyond loopback is performed by the official Codex children or by the

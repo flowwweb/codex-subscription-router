@@ -2,8 +2,8 @@
 
 ![Multi-subscription account menu](screenshots/account-menu.png)
 
-Use multiple ChatGPT subscriptions from an independent macOS desktop app, or
-run the routing backend beside the official Windows Codex app.
+Use multiple ChatGPT subscriptions through a local Windows app-server router
+and dashboard, or from an independently patched macOS desktop app.
 
 Codex Subscription Router creates a locally patched copy of the official
 ChatGPT app, balances new chats across connected subscriptions, and keeps every
@@ -73,20 +73,18 @@ Codex Subscription Router currently targets:
 
 | Component | Supported value |
 | --- | --- |
-| Platform | macOS on Apple silicon |
+| macOS platform | Apple silicon |
+| Windows platform | Windows x64 standalone router and dashboard |
 | Official ChatGPT version | `26.803.61601` |
 | Official bundle build | `6396` |
 | Go | 1.26 or newer |
 | Node.js | 22.12 or newer |
 
-The Windows adapter targets Windows x64 with the installed `OpenAI.Codex`
-package and Go 1.26+. It installs a standalone router command that uses the
-user-local backend already used by the official Windows app, leaves the
-protected Windows package unchanged, and keeps router state under
-`%LOCALAPPDATA%\\Codex Subscription Router`. Pass `-CodexExecutable` when
-discovery needs an explicit path. The current adapter does not claim official
-Windows GUI interception, the macOS renderer/account-menu, Computer Use
-identity, or provider-auth parity.
+The Windows build targets the installed `OpenAI.Codex` package and Go 1.26+.
+It installs a per-user daemon, localhost subscription dashboard, and explicit
+app-server bridge. It leaves the protected Windows package unchanged and keeps
+router state under `%LOCALAPPDATA%\\Codex Subscription Router`. The official
+Windows GUI does not currently use this bridge; the dashboard says so directly.
 
 The patcher verifies the official version, build, ASAR hash, renderer anchors,
 and native binary constants before changing anything. An unknown upstream build
@@ -94,6 +92,17 @@ is rejected by default rather than being partially patched. See
 [Compatibility](docs/COMPATIBILITY.md) for the recorded hash and test details.
 
 ## Requirements
+
+Choose the section for your platform. Windows does not require Node.js, Xcode,
+or an Apple signing identity.
+
+### Windows
+
+- Windows x64 with the official Codex app installed
+- Go 1.26+
+- PowerShell 5.1+
+
+### macOS
 
 - The official ChatGPT app installed at `/Applications/ChatGPT.app`
 - Xcode Command Line Tools
@@ -110,7 +119,7 @@ Run one command. It downloads or updates the source, installs the locked build
 dependency, creates the independently signed app, and launches it:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/b-nnett/codex-subscription-router/main/install.sh | /bin/bash
+curl -fsSL https://raw.githubusercontent.com/flowwweb/codex-subscription-router/main/install.sh | /bin/bash
 ```
 
 The installer keeps its source checkout in
@@ -130,29 +139,40 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\\install.ps1
 ```
 
-This builds `codex-mux.exe`, creates
-`%LOCALAPPDATA%\\Codex Subscription Router\\Codex Subscription Router.cmd`,
-and starts the standalone app-server router with a router-owned primary
-`CODEX_HOME`. It does not modify the official package. Pass
+This installs a versioned `codex-mux.exe`, starts one per-user daemon, registers
+launch at sign-in, and opens the subscription dashboard in your default
+browser. The dashboard connects subscriptions, shows short and weekly usage and
+reset times, and controls whether each subscription participates in routing.
+It does not modify the official package. Pass
 `-OfficialExecutable C:\\path\\to\\ChatGPT.exe` or
 `-CodexExecutable C:\\path\\to\\codex.exe` when automatic discovery is not
-available. The install receipt includes package hashes and paths but never
-prints the control token. Invoke the `.cmd` launcher from a caller that speaks
-the Codex app-server stdio protocol; the current Windows GUI build does not
-consume the router override for its local app-server.
+available.
+
+Two shortcuts are installed under
+`%LOCALAPPDATA%\\Codex Subscription Router`:
+
+- `Open Subscription Router.cmd` starts or repairs the daemon and opens a fresh
+  one-use dashboard URL.
+- `Codex Subscription Router.cmd` is the stdio bridge for a compatible Codex
+  app-server client.
+
+The install receipt includes package hashes, build identity, PID, and dynamic
+loopback address but never prints a credential or durable control token. The
+official Windows GUI build does not consume the bridge.
 
 > [!TIP]
 > To inspect the installer before running it, open
-> [`install.sh`](install.sh) or download it without piping it into a shell.
+> [`install.ps1`](install.ps1) on Windows or [`install.sh`](install.sh) on
+> macOS.
 
 ### Install via prompt
 
-> Install Codex Subscription Router from `https://github.com/b-nnett/codex-subscription-router` on this Mac using the repository's supported one-command installer, without modifying the official ChatGPT app or deleting any existing router state. Verify the resulting app and Computer Use helper signatures, launch the app, and ask me only if a prerequisite or macOS permission requires interaction.
+> Install Codex Subscription Router from `https://github.com/flowwweb/codex-subscription-router` using the supported installer for this computer, without modifying the official app or deleting existing router state. Verify the installed artifact and launch its setup surface.
 
 ### Install from a clone
 
 ```sh
-git clone https://github.com/b-nnett/codex-subscription-router.git
+git clone https://github.com/flowwweb/codex-subscription-router.git
 cd codex-subscription-router
 npm ci --ignore-scripts
 python3 scripts/patch_app.py
@@ -206,6 +226,18 @@ the independent app has its own identity and permission rows. macOS may also
 request Automation access the first time Computer Use controls another app.
 
 ## Add subscriptions
+
+### Windows
+
+The installer opens the local dashboard automatically. Select **Connect
+subscription**, complete the ChatGPT device-code sign-in, then add the next
+subscription. Existing codex-lb users can expand **Use subscriptions already
+connected in codex-lb**, export each account as Codex auth JSON, pause codex-lb
+routing for those accounts, and import all exports together. This is a one-time
+migration, not live synchronization: only one product may own refresh for the
+copied credentials.
+
+### macOS
 
 1. Open the profile menu at the bottom of the sidebar.
 2. Select **Add another subscription**.
@@ -275,10 +307,16 @@ helper and socket paths and are not relocatable or intended for redistribution.
 | `~/.codex-mux/control-token` | Token for the loopback-only control service |
 | `~/.codex-mux/backups` | Recoverable app and helper backups |
 | `~/Library/Application Support/Codex Subscription Router` | Independent desktop profile |
+| `%LOCALAPPDATA%\\Codex Subscription Router\\state` | Windows routing metadata, runtime receipt, control token, and isolated accounts |
+| `%LOCALAPPDATA%\\Codex Subscription Router\\primary-codex-home` | Windows Primary credentials and account data |
+| `%LOCALAPPDATA%\\Codex Subscription Router\\versions` | Versioned Windows router binaries |
 
-The control service binds only to `127.0.0.1` and protects private routes with a
-random 256-bit token. OAuth tokens stay inside their account's Codex home and
-are never returned by the control API. Account directories are owner-only.
+The control service binds to a dynamic `127.0.0.1` port published only in a
+protected runtime receipt. Browser setup exchanges a short-lived one-use
+fragment nonce for an HttpOnly same-site session; mutations require CSRF and
+strict Host/Origin checks. OAuth tokens stay inside their account's Codex home
+and are never returned by the router API. Windows account directories use a
+verified protected DACL for the current user and SYSTEM.
 
 Plugin configuration is intentionally synchronized from the Primary account.
 Inline secrets inside shared MCP configuration are therefore copied to each
@@ -292,6 +330,7 @@ control-service issue.
 ```sh
 npm ci --ignore-scripts
 npm run check
+npm run check:windows
 npm run release:check
 ```
 
@@ -311,6 +350,8 @@ latest completed run is recorded in
   because the upstream profile response exposes counts rather than skill IDs.
 - Generated app bundles are tied to one macOS user and signing team.
 - Releases are source-only; patched OpenAI binaries are never distributed.
+- The official Windows GUI does not currently route through the standalone
+  app-server bridge.
 
 ## Contributing and releases
 

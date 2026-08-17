@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
 }
 
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-foreach ($required in @("codexBackendExecutable", "muxExecutable", "stateRoot", "primaryCodexHome")) {
+foreach ($required in @("codexBackendExecutable", "codexBackendSha256", "muxExecutable", "muxSha256", "stateRoot", "primaryCodexHome", "buildId")) {
     if ([string]::IsNullOrWhiteSpace([string]$config.$required)) {
         throw "Router configuration is missing '$required'; rerun install.ps1."
     }
@@ -70,6 +70,12 @@ foreach ($path in @($config.codexBackendExecutable, $config.muxExecutable)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Configured router path is missing: $path"
     }
+}
+if ((Get-FileHash -LiteralPath $config.codexBackendExecutable -Algorithm SHA256).Hash -ne [string]$config.codexBackendSha256) {
+    throw "Configured Codex backend changed; rerun install.ps1 before routing."
+}
+if ((Get-FileHash -LiteralPath $config.muxExecutable -Algorithm SHA256).Hash -ne [string]$config.muxSha256) {
+    throw "Installed router binary failed its integrity check; rerun install.ps1."
 }
 
 $env:CODEX_MUX_REAL_CODEX = [string]$config.codexBackendExecutable

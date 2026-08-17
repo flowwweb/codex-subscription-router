@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -159,6 +160,18 @@ func runDaemon(realArgs []string) error {
 		return err
 	}
 	defer multiplexer.Close()
+	initializeParams, _ := json.Marshal(map[string]any{
+		"clientInfo": map[string]string{
+			"name": "codex-subscription-router", "title": "Codex Subscription Router", "version": buildID,
+		},
+		"capabilities": map[string]any{},
+	})
+	initializeCtx, initializeCancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := multiplexer.InitializeStandalone(initializeCtx, initializeParams); err != nil {
+		initializeCancel()
+		return fmt.Errorf("initialize daemon account pool: %w", err)
+	}
+	initializeCancel()
 
 	token, err := loadOrCreateToken(root)
 	if err != nil {
