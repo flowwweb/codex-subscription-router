@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([int] $ReadyTimeoutSeconds = 30, [string] $InstallRoot)
+param([int] $ReadyTimeoutSeconds = 60, [string] $InstallRoot)
 
 $ErrorActionPreference = "Stop"
 $installRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { $InstallRoot }
