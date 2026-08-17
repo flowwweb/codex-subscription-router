@@ -46,10 +46,18 @@ if (Test-Runtime $existing) {
     exit 0
 }
 if ($existing -and -not [string]::IsNullOrWhiteSpace([string]$existing.address) -and -not [string]::IsNullOrWhiteSpace([string]$existing.instance)) {
+    $previousPid = [int]$existing.pid
     try {
         Invoke-WebRequest -UseBasicParsing -Method Post -Uri ("http://{0}/v1/runtime/shutdown" -f $existing.address) -Headers @{ "X-Codex-Mux-Instance" = [string]$existing.instance } -TimeoutSec 3 | Out-Null
-        Start-Sleep -Milliseconds 400
-    } catch {}
+    } catch {
+        Fail "could not stop the previous daemon: $($_.Exception.Message)"
+    }
+    if ($previousPid -gt 0) {
+        Wait-Process -Id $previousPid -Timeout 10 -ErrorAction SilentlyContinue
+        if (Get-Process -Id $previousPid -ErrorAction SilentlyContinue) {
+            Fail "previous daemon PID $previousPid did not stop within 10 seconds"
+        }
+    }
 }
 
 $env:CODEX_MUX_REAL_CODEX = [string]$config.codexBackendExecutable
