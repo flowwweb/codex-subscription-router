@@ -88,8 +88,14 @@
       fragment.querySelector('.account-identity').textContent = account.connected ? (account.email || 'Connected') : (account.error || 'Not connected');
       const usage = fragment.querySelector('.usage');
       const limits = account.rateLimits || {};
-      for (const line of [resetText(limits.primary, 'Short window'), resetText(limits.secondary, 'Weekly')]) {
-        const p = document.createElement('p'); p.textContent = line; usage.append(p);
+      for (const item of [{ window: limits.primary, name: 'Short window' }, { window: limits.secondary, name: 'Weekly' }]) {
+        const row = document.createElement('div'); row.className = 'usage-row';
+        row.setAttribute('aria-label', resetText(item.window, item.name));
+        const label = document.createElement('span'); label.textContent = item.name;
+        const progress = document.createElement('progress'); progress.max = 100; progress.value = item.window ? Math.round(Number(item.window.usedPercent || 0)) : 0;
+        const value = document.createElement('span'); value.className = 'usage-value'; value.textContent = item.window ? `${progress.value}%` : '—';
+        row.append(label, progress, value);
+        usage.append(row);
       }
       const enabled = fragment.querySelector('.enabled');
       enabled.checked = Boolean(account.enabled);

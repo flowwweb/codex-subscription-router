@@ -63,15 +63,19 @@ type Multiplexer struct {
 	store          *state.Store
 	output         io.Writer
 
-	childrenMu sync.RWMutex
-	children   map[string]*backend.Child
-	childStart map[string]time.Time
-	restarts   map[string]int
-	startMu    sync.Mutex
-	inbound    chan backend.Inbound
-	runCtx     context.Context
-	runCancel  context.CancelFunc
-	closeOnce  sync.Once
+	childrenMu  sync.RWMutex
+	children    map[string]*backend.Child
+	childStart  map[string]time.Time
+	restarts    map[string]int
+	startMu     sync.Mutex
+	inbound     chan backend.Inbound
+	runCtx      context.Context
+	runCancel   context.CancelFunc
+	runStop     func() bool
+	runWG       sync.WaitGroup
+	lifecycleMu sync.Mutex
+	closed      bool
+	closeOnce   sync.Once
 
 	initializationMu sync.RWMutex
 	initializeParams json.RawMessage
@@ -141,6 +145,11 @@ func New(options Options) (*Multiplexer, error) {
 }
 
 func (m *Multiplexer) Start(ctx context.Context) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.closed {
+		return errors.New("multiplexer is closed")
+	}
 	for _, account := range m.store.Accounts() {
 		if !account.Enabled {
 			continue
@@ -152,9 +161,21 @@ func (m *Multiplexer) Start(ctx context.Context) error {
 	if len(m.childEntries()) == 0 {
 		return errors.New("no Codex app-server process could be started")
 	}
-	go m.inboundLoop(ctx)
-	go m.syncManagedConfigLoop(ctx)
+	m.startBackgroundLoops(ctx)
 	return nil
+}
+
+func (m *Multiplexer) startBackgroundLoops(ctx context.Context) {
+	m.runStop = context.AfterFunc(ctx, m.runCancel)
+	m.runWG.Add(2)
+	go func() {
+		defer m.runWG.Done()
+		m.inboundLoop(m.runCtx)
+	}()
+	go func() {
+		defer m.runWG.Done()
+		m.syncManagedConfigLoop(m.runCtx)
+	}()
 }
 
 func (m *Multiplexer) syncManagedConfigLoop(ctx context.Context) {
@@ -174,7 +195,14 @@ func (m *Multiplexer) syncManagedConfigLoop(ctx context.Context) {
 
 func (m *Multiplexer) Close() {
 	m.closeOnce.Do(func() {
+		m.lifecycleMu.Lock()
+		m.closed = true
+		if m.runStop != nil {
+			m.runStop()
+		}
 		m.runCancel()
+		m.lifecycleMu.Unlock()
+		m.runWG.Wait()
 		m.childrenMu.Lock()
 		children := make([]*backend.Child, 0, len(m.children))
 		for accountID, child := range m.children {

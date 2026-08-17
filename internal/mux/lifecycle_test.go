@@ -70,6 +70,33 @@ func TestMuxFakeBackendProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestCloseStopsManagedConfigLoop(t *testing.T) {
+	multiplexer, store, _ := newLifecycleMux(t, false)
+	primaryHome := store.Accounts()[0].CodexHome
+	account, err := store.AddAccount("Work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	multiplexer.startBackgroundLoops(context.Background())
+	multiplexer.Close()
+
+	updated := "model = \"must-not-sync-after-close\"\n"
+	if err := os.WriteFile(filepath.Join(primaryHome, "config.toml"), []byte(updated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2200 * time.Millisecond)
+	isolated, err := os.ReadFile(filepath.Join(account.CodexHome, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(isolated), "must-not-sync-after-close") {
+		t.Fatal("managed config loop continued after Close returned")
+	}
+	if err := multiplexer.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("Start after Close error = %v, want closed", err)
+	}
+}
+
 func TestStartSkipsDisabledAccounts(t *testing.T) {
 	multiplexer, store, logPath := newLifecycleMux(t, false)
 	disabled := false

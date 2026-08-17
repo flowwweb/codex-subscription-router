@@ -3,12 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Subscription Router</title>
+  <title>Flowwweb Router</title>
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/app.js" defer></script>
 </head>
 <body>
   <main class="shell">
+    <nav class="product-bar" aria-label="Product">
+      <span class="brand"><span class="brand-mark" aria-hidden="true"></span>Flowwweb Router</span>
+      <span class="local-label">Local only</span>
+    </nav>
     <header class="status-card">
       <div>
         <p class="eyebrow">Subscription Router</p>
@@ -18,7 +22,7 @@
       <span id="health-badge" class="badge" aria-live="polite">Checking</span>
     </header>
 
-    <section aria-labelledby="subscriptions-title">
+    <section class="subscriptions" aria-labelledby="subscriptions-title">
       <div class="section-heading">
         <div>
           <p class="eyebrow">Subscriptions</p>
@@ -45,7 +49,7 @@
       <p>This dashboard manages subscriptions for the standalone app-server router. The official Codex Windows app does not currently route through it.</p>
     </aside>
 
-    <details>
+    <details class="technical">
       <summary>Technical details</summary>
       <p>Build: <code id="technical-build">Loading…</code></p>
       <p>Router state: <code id="technical-state">Loading…</code></p>

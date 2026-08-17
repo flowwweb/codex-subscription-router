@@ -178,6 +178,22 @@ function Set-PrivateStateAcl([string] $Path) {
     }
 }
 
+function Test-PrivateAclEntry([string] $Path) {
+    try {
+        $current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $allowed = @($current, "S-1-5-18")
+        $item = New-Object System.IO.DirectoryInfo($Path)
+        $acl = $item.GetAccessControl()
+        $unexpected = @($acl.Access | Where-Object {
+            $sid = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+            $sid -notin $allowed -or $_.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow
+        })
+        return $acl.AreAccessRulesProtected -and $unexpected.Count -eq 0
+    } catch {
+        return $false
+    }
+}
+
 if ($env:OS -ne "Windows_NT") {
     Fail "this installer is for Windows only"
 }
@@ -214,6 +230,7 @@ $beforeCodexHash = (Get-FileHash -LiteralPath $officialCodex -Algorithm SHA256).
 $beforeBackendHash = (Get-FileHash -LiteralPath $codexBackend -Algorithm SHA256).Hash
 $stateRoot = Join-Path $installRoot "state"
 $primaryCodexHome = Join-Path $installRoot "primary-codex-home"
+$primaryRequiresAclMigration = (Test-Path -LiteralPath $primaryCodexHome -PathType Container) -and -not (Test-PrivateAclEntry $primaryCodexHome)
 $versionsRoot = Join-Path $installRoot "versions"
 $sourceRevision = $null
 if (Get-Command git.exe -ErrorAction SilentlyContinue) {
@@ -293,7 +310,13 @@ $configTemporary = $configPath + ".new"
 $config | ConvertTo-Json | Set-Content -LiteralPath $configTemporary -Encoding UTF8
 Move-Item -LiteralPath $configTemporary -Destination $configPath -Force
 Set-PrivateStateAcl $stateRoot
-Set-PrivateStateAcl $primaryCodexHome
+if ($primaryRequiresAclMigration) {
+    Set-PrivateStateAcl $primaryCodexHome
+} else {
+    # A protected root gives newly-created credentials the private inherited ACL.
+    # Rewalking a mature Codex home on every upgrade can otherwise take minutes.
+    Set-PrivateAclEntry -Path $primaryCodexHome -IsDirectory $true
+}
 
 $stateReceipt = [ordered]@{
     installed = $true
