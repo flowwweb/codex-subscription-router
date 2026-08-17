@@ -330,7 +330,7 @@
     } catch (error) { setOffline(error); }
   }
 
-  $('#connect').addEventListener('click', addOrConnect);
+  document.querySelectorAll('[data-connect]').forEach((button) => button.addEventListener('click', addOrConnect));
   $('#migrate-codex-lb').addEventListener('click', migrateCodexLB);
   $('#codex-lb-files').addEventListener('change', () => { state.migrationReview = null; $('#migration-preview').hidden = true; $('#migrate-codex-lb').textContent = 'Review migration'; });
   start();

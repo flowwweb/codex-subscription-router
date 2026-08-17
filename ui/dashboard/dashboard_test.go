@@ -19,6 +19,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 		"technical-build",
 		"Codex Router",
 		"flowwweb-mark.svg",
+		"mobile-connect",
 	} {
 		if !strings.Contains(html, text) {
 			t.Errorf("index is missing %q", text)

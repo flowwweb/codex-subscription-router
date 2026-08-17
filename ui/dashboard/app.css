@@ -69,6 +69,7 @@ p { margin: .55rem 0 0; color: #a5a7b1; line-height: 1.55; }
   box-shadow: 0 10px 30px rgba(83, 93, 230, .2);
 }
 .primary:hover { border-color: #aa9fff; filter: brightness(1.08); }
+.mobile-connect { display: none; }
 .secondary { background: #111217; color: #e6e6e9; }
 .accounts { display: grid; margin-top: 1rem; border-block: 1px solid #25272e; }
 .account-card { min-height: 8.5rem; padding: 1.35rem 0; border-top: 1px solid #25272e; }
@@ -112,11 +113,12 @@ details[open] > summary::after { transform: rotate(-90deg); }
 code { user-select: all; overflow-wrap: anywhere; color: #b9afff; }
 [hidden] { display: none !important; }
 @media (max-width: 44rem) {
-  .shell { width: min(100% - 1.5rem, 70rem); padding: .65rem 0 7rem; }
+  .shell { width: min(100% - 1.5rem, 70rem); padding: .65rem 0 2rem; }
   .status-card { min-height: 12rem; padding: 2.2rem 0 1.75rem; align-items: flex-start; flex-direction: column; gap: 1.25rem; }
   h1 { font-size: clamp(2.2rem, 13vw, 3.5rem); }
   .section-heading, .account-card { align-items: stretch; flex-direction: column; }
-  .section-heading .primary { position: fixed; z-index: 5; inset: auto .75rem .75rem; width: calc(100% - 1.5rem); min-height: 3.5rem; }
+  .desktop-connect { display: none; }
+  .mobile-connect { display: block; width: 100%; min-height: 3.5rem; margin-top: 1rem; }
   .accounts { gap: .75rem; border: 0; }
   .account-card { min-height: 0; padding: 1.15rem; border: 1px solid #292b33; border-radius: 1rem; background: #0e0f13; }
   .account-card:first-child { border-top: 1px solid #292b33; }
