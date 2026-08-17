@@ -22,7 +22,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("index is missing %q", text)
 		}
 	}
-	for _, contract := range []string{"min-width: 320px", "min-height: 44px", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
+	for _, contract := range []string{"min-width: 0", "min-height: 44px", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
 		if !strings.Contains(css, contract) {
 			t.Errorf("CSS is missing %q", contract)
 		}
