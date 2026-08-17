@@ -317,6 +317,9 @@ Write-Output (ConvertTo-Json -Depth 3 $stateReceipt)
 if (-not $NoLaunch) {
     try {
         $runtimeReceipt = & $startScript -InstallRoot $installRoot | Select-Object -Last 1 | ConvertFrom-Json
+        if (-not $runtimeReceipt -or [string]$runtimeReceipt.build -ne [string]$config.buildId) {
+            throw "new router did not return an exact matching readiness receipt"
+        }
     } catch {
         $newFailure = $_.Exception.Message
         if ($env:CODEX_MUX_ACCEPTANCE_TEST -eq "simulate-readiness-failure") {
