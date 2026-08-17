@@ -230,7 +230,11 @@ $beforeCodexHash = (Get-FileHash -LiteralPath $officialCodex -Algorithm SHA256).
 $beforeBackendHash = (Get-FileHash -LiteralPath $codexBackend -Algorithm SHA256).Hash
 $stateRoot = Join-Path $installRoot "state"
 $primaryCodexHome = Join-Path $installRoot "primary-codex-home"
-$primaryRequiresAclMigration = (Test-Path -LiteralPath $primaryCodexHome -PathType Container) -and -not (Test-PrivateAclEntry $primaryCodexHome)
+$primaryAclMarker = Join-Path $primaryCodexHome ".private-acl-v2-complete"
+$primaryRequiresAclMigration = (Test-Path -LiteralPath $primaryCodexHome -PathType Container) -and (
+    -not (Test-PrivateAclEntry $primaryCodexHome) -or
+    -not (Test-Path -LiteralPath $primaryAclMarker -PathType Leaf)
+)
 $versionsRoot = Join-Path $installRoot "versions"
 $sourceRevision = $null
 if (Get-Command git.exe -ErrorAction SilentlyContinue) {
@@ -312,6 +316,8 @@ Move-Item -LiteralPath $configTemporary -Destination $configPath -Force
 Set-PrivateStateAcl $stateRoot
 if ($primaryRequiresAclMigration) {
     Set-PrivateStateAcl $primaryCodexHome
+    "Private ACL migration completed by installer v2." | Set-Content -LiteralPath $primaryAclMarker -Encoding UTF8
+    Set-PrivateAclEntry -Path $primaryAclMarker -IsDirectory $false
 } else {
     # A protected root gives newly-created credentials the private inherited ACL.
     # Rewalking a mature Codex home on every upgrade can otherwise take minutes.

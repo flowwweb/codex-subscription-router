@@ -58,4 +58,13 @@ foreach ($required in @(
     }
 }
 
+$markerDecision = $installer.IndexOf('$primaryRequiresAclMigration')
+$markerWrite = $installer.IndexOf('Set-Content -LiteralPath $primaryAclMarker')
+if ($markerDecision -lt 0 -or $markerWrite -le $markerDecision) {
+    throw "Windows installer must write the primary ACL completion marker only after deciding migration is required"
+}
+if ($installer -notmatch '-not \(Test-Path -LiteralPath \$primaryAclMarker -PathType Leaf\)') {
+    throw "Windows installer must resume primary ACL migration when its completion marker is absent"
+}
+
 Write-Output "Windows installer and launcher syntax passed"

@@ -27,6 +27,11 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("CSS is missing %q", contract)
 		}
 	}
+	for _, contract := range []string{"usage-reset", "aria-labelledby", "aria-describedby", "summary::after", "details[open] > summary::after"} {
+		if !strings.Contains(css+js, contract) {
+			t.Errorf("accessible dashboard styling is missing %q", contract)
+		}
+	}
 	for _, contract := range []string{"history.replaceState", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for ChatGPT", "Subscription connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this one-time migration", "backupAvailable", "Open ChatGPT verification", "restoreFocus", "login?.authUrl", "notice.focus()"} {
 		if !strings.Contains(js, contract) {
 			t.Errorf("JavaScript is missing %q", contract)

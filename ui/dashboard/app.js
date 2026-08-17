@@ -45,13 +45,6 @@
     state.csrf = result.csrfToken;
   }
 
-  function resetText(window, name) {
-    if (!window) return `${name}: usage unavailable`;
-    const used = Math.round(Number(window.usedPercent || 0));
-    const reset = window.resetsAt ? new Date(window.resetsAt * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'reset time unavailable';
-    return `${name}: ${used}% used · Resets ${reset}`;
-  }
-
   function render() {
     const activeCard = document.activeElement?.closest?.('[data-account-id]');
     const activeControl = ['enabled', 'rename', 'login', 'remove'].find((name) => document.activeElement?.classList?.contains(name));
@@ -88,13 +81,16 @@
       fragment.querySelector('.account-identity').textContent = account.connected ? (account.email || 'Connected') : (account.error || 'Not connected');
       const usage = fragment.querySelector('.usage');
       const limits = account.rateLimits || {};
-      for (const item of [{ window: limits.primary, name: 'Short window' }, { window: limits.secondary, name: 'Weekly' }]) {
+      for (const [index, item] of [{ window: limits.primary, name: 'Short window' }, { window: limits.secondary, name: 'Weekly' }].entries()) {
         const row = document.createElement('div'); row.className = 'usage-row';
-        row.setAttribute('aria-label', resetText(item.window, item.name));
-        const label = document.createElement('span'); label.textContent = item.name;
+        const label = document.createElement('span'); label.className = 'usage-label'; label.id = `usage-${account.id}-${index}-label`; label.textContent = item.name;
+        const reset = document.createElement('span'); reset.className = 'usage-reset'; reset.id = `usage-${account.id}-${index}-reset`;
+        reset.textContent = item.window?.resetsAt ? `Resets ${new Date(item.window.resetsAt * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : 'Reset time unavailable';
         const progress = document.createElement('progress'); progress.max = 100; progress.value = item.window ? Math.round(Number(item.window.usedPercent || 0)) : 0;
+        progress.setAttribute('aria-labelledby', label.id);
+        progress.setAttribute('aria-describedby', reset.id);
         const value = document.createElement('span'); value.className = 'usage-value'; value.textContent = item.window ? `${progress.value}%` : '—';
-        row.append(label, progress, value);
+        row.append(label, reset, progress, value);
         usage.append(row);
       }
       const enabled = fragment.querySelector('.enabled');

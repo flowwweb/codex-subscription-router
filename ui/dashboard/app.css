@@ -77,7 +77,10 @@ p { margin: .55rem 0 0; color: #a5a7b1; line-height: 1.55; }
 .account-main { min-width: 0; }
 .account-identity, .usage { color: #90939f; }
 .usage { display: grid; grid-template-columns: repeat(2, minmax(13rem, 1fr)); gap: .55rem 1.4rem; margin-top: 1rem; font-size: .78rem; }
-.usage-row { display: grid; grid-template-columns: 5.6rem minmax(5rem, 10rem) 2.3rem; align-items: center; gap: .6rem; }
+.usage-row { display: grid; grid-template-columns: 5.6rem minmax(5rem, 10rem) 2.3rem; align-items: center; gap: .2rem .6rem; }
+.usage-label { grid-column: 1; grid-row: 1; color: #d7d8dd; }
+.usage-reset { grid-column: 1 / -1; grid-row: 2; color: #747782; font-size: .7rem; }
+.usage-row progress { grid-column: 2; grid-row: 1; }
 .usage-value { color: #d7d8dd; font-variant-numeric: tabular-nums; text-align: right; }
 progress { width: 100%; height: .28rem; overflow: hidden; border: 0; border-radius: 99px; background: #292b31; }
 progress::-webkit-progress-bar { background: #292b31; border-radius: 99px; }
@@ -99,7 +102,10 @@ progress::-moz-progress-bar { background: #7662f2; border-radius: 99px; }
 .confirm-label { display: flex; align-items: center; gap: .65rem; margin: .5rem 0; }
 .constraint { border-left: 3px solid #7b69f1; }
 .constraint strong { font-size: .88rem; }
-summary { display: flex; align-items: center; cursor: pointer; font-weight: 700; }
+summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; cursor: pointer; font-weight: 700; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "›"; color: #9699a5; font-size: 1.25rem; line-height: 1; transform: rotate(90deg); transition: transform 160ms ease; }
+details[open] > summary::after { transform: rotate(-90deg); }
 .technical { margin-top: 0; }
 .technical p { font-size: .85rem; }
 .empty { padding: 2.5rem 0; text-align: center; }
@@ -121,4 +127,5 @@ code { user-select: all; overflow-wrap: anywhere; color: #b9afff; }
   .accounts, .account-card, .migration, .constraint, .technical, .notice, .badge { border-color: CanvasText; box-shadow: none; }
   .primary { background: ButtonFace; color: ButtonText; }
   .local-label::before { background: CanvasText; }
+  summary::after { color: CanvasText; }
 }
