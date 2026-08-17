@@ -133,7 +133,7 @@
 
   function loginDetails(login) {
     const code = login?.userCode || login?.user_code || login?.deviceCode || login?.device_code;
-    const uri = login?.verificationUriComplete || login?.verification_uri_complete || login?.verificationUri || login?.verification_uri;
+    const uri = login?.verificationUriComplete || login?.verification_uri_complete || login?.verificationUri || login?.verification_uri || login?.verificationUrl || login?.verification_url || login?.authUrl || login?.auth_url;
     return { code, uri };
   }
 
@@ -198,7 +198,8 @@
     if (!window.confirm(`Remove ${account.label || 'this subscription'} from the router? Its account home will be archived.`)) return;
     try {
       await api(`/v1/accounts/${encodeURIComponent(account.id)}`, { method: 'DELETE' });
-      await loadAccounts(); announce('Subscription removed. Its local account home was archived for recovery.');
+      announce('Subscription removed. Its local account home was archived for recovery.');
+      await loadAccounts(); notice.focus();
     } catch (error) { announce(error.message, true); }
   }
 

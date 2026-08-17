@@ -47,11 +47,21 @@ if (Test-Runtime $existing) {
 }
 if ($existing -and -not [string]::IsNullOrWhiteSpace([string]$existing.address) -and -not [string]::IsNullOrWhiteSpace([string]$existing.instance)) {
     $previousPid = [int]$existing.pid
-    $recordedProcess = if ($previousPid -gt 0) { Get-Process -Id $previousPid -ErrorAction SilentlyContinue } else { $null }
+    $recordedProcess = if ($previousPid -gt 0) { Get-CimInstance Win32_Process -Filter "ProcessId = $previousPid" -ErrorAction SilentlyContinue } else { $null }
     if (-not $recordedProcess) {
         $staleReceiptPath = Join-Path $config.stateRoot "runtime.json"
         Remove-Item -LiteralPath $staleReceiptPath -Force -ErrorAction Stop
         $existing = $null
+    } else {
+        $recordedPath = [string]$recordedProcess.ExecutablePath
+        $versionsRoot = [System.IO.Path]::GetFullPath((Join-Path $installRoot "versions")).TrimEnd('\') + '\'
+        $isInstalledMux = -not [string]::IsNullOrWhiteSpace($recordedPath) -and
+            [System.IO.Path]::GetFullPath($recordedPath).StartsWith($versionsRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+            (Split-Path -Leaf $recordedPath) -eq "codex-mux.exe"
+        if (-not $isInstalledMux) {
+            Remove-Item -LiteralPath (Join-Path $config.stateRoot "runtime.json") -Force -ErrorAction Stop
+            $existing = $null
+        }
     }
 }
 if ($existing -and -not [string]::IsNullOrWhiteSpace([string]$existing.address) -and -not [string]::IsNullOrWhiteSpace([string]$existing.instance)) {
@@ -67,6 +77,10 @@ if ($existing -and -not [string]::IsNullOrWhiteSpace([string]$existing.address) 
             Fail "previous daemon PID $previousPid did not stop within 10 seconds"
         }
     }
+}
+
+if ($env:CODEX_MUX_ACCEPTANCE_TEST -eq "simulate-readiness-failure") {
+    Fail "simulated daemon readiness failure after previous-owner shutdown"
 }
 
 $env:CODEX_MUX_REAL_CODEX = [string]$config.codexBackendExecutable

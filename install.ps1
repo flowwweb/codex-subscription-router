@@ -318,15 +318,25 @@ if (-not $NoLaunch) {
     try {
         $runtimeReceipt = & $startScript -InstallRoot $installRoot | Select-Object -Last 1 | ConvertFrom-Json
     } catch {
+        $newFailure = $_.Exception.Message
+        if ($env:CODEX_MUX_ACCEPTANCE_TEST -eq "simulate-readiness-failure") {
+            Remove-Item Env:CODEX_MUX_ACCEPTANCE_TEST -ErrorAction SilentlyContinue
+        }
+        $rollbackFailure = $null
         if ($previousConfig) {
             $previousConfig | Set-Content -LiteralPath $configPath -Encoding UTF8
             try {
                 $previous = $previousConfig | ConvertFrom-Json
                 $previousStart = if (-not [string]::IsNullOrWhiteSpace([string]$previous.startScript)) { [string]$previous.startScript } else { Join-Path $installRoot "start-router.ps1" }
-                if ([int]$previous.schemaVersion -ge 2) { & $previousStart -InstallRoot $installRoot | Out-Null }
-            } catch {}
+                if ([int]$previous.schemaVersion -ge 2) {
+                    $restored = & $previousStart -InstallRoot $installRoot | Select-Object -Last 1 | ConvertFrom-Json
+                    if ([string]$restored.build -ne [string]$previous.buildId) { throw "restored daemon build does not match previous configuration" }
+                }
+            } catch { $rollbackFailure = $_.Exception.Message }
         }
-        Fail "new router failed readiness and configuration was rolled back: $($_.Exception.Message)"
+        if ($rollbackFailure) { Fail "new router failed readiness ($newFailure) and rollback failed ($rollbackFailure)" }
+        if ($previousConfig) { Fail "new router failed readiness and the previous installed daemon was restored and verified: $newFailure" }
+        Fail "new router failed readiness and no previous installation was available: $newFailure"
     }
 
     foreach ($script in @(
