@@ -316,7 +316,9 @@ Write-Output (ConvertTo-Json -Depth 3 $stateReceipt)
 
 if (-not $NoLaunch) {
     try {
-        $runtimeReceipt = & $startScript -InstallRoot $installRoot | Select-Object -Last 1 | ConvertFrom-Json
+        $startOutput = & (Join-Path $PSHOME "powershell.exe") -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $startScript -InstallRoot $installRoot 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "new router start process exited with code $LASTEXITCODE" }
+        $runtimeReceipt = $startOutput | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith("{") } | Select-Object -Last 1 | ConvertFrom-Json
         if (-not $runtimeReceipt -or [string]$runtimeReceipt.build -ne [string]$config.buildId) {
             throw "new router did not return an exact matching readiness receipt"
         }
@@ -332,7 +334,9 @@ if (-not $NoLaunch) {
                 $previous = $previousConfig | ConvertFrom-Json
                 $previousStart = if (-not [string]::IsNullOrWhiteSpace([string]$previous.startScript)) { [string]$previous.startScript } else { Join-Path $installRoot "start-router.ps1" }
                 if ([int]$previous.schemaVersion -ge 2) {
-                    $restored = & $previousStart -InstallRoot $installRoot | Select-Object -Last 1 | ConvertFrom-Json
+                    $rollbackOutput = & (Join-Path $PSHOME "powershell.exe") -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $previousStart -InstallRoot $installRoot 2>&1
+                    if ($LASTEXITCODE -ne 0) { throw "previous router start process exited with code $LASTEXITCODE" }
+                    $restored = $rollbackOutput | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith("{") } | Select-Object -Last 1 | ConvertFrom-Json
                     if ([string]$restored.build -ne [string]$previous.buildId) { throw "restored daemon build does not match previous configuration" }
                 }
             } catch { $rollbackFailure = $_.Exception.Message }
