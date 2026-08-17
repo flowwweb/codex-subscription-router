@@ -34,13 +34,13 @@ without opening the localhost dashboard or modifying the signed Codex app.
   slot only for an explicit connection intent with no reusable candidate or an
   explicit `--new` request.
 - Login is allowed for a paused account without enabling it for routing.
-- Only the server's sanitized `userCode`, allowlisted HTTPS OpenAI/ChatGPT
-  verification URL, public attempt state, account identity, and compact routing
-  status may cross the task-action boundary. Raw provider results,
-  `device_code`, auth files, cookies, and control tokens never cross it.
-- The client revalidates the verification URL before opening it. Browser launch
-  uses an argument-array process call, never a shell command. Launch failure is
-  reported while leaving the trusted link and code available.
+- Only the server's allowlisted HTTPS OpenAI/ChatGPT sign-in URL, optional
+  sanitized user code, public attempt state, account identity, and compact
+  routing status may cross the task-action boundary. Raw provider results,
+  authorization codes, auth files, cookies, and control tokens never cross it.
+- The client revalidates the sign-in URL before opening it. Browser launch uses
+  an argument-array process call, never a shell command. Launch failure is
+  reported while leaving the trusted link available.
 
 ## Interaction contract
 
@@ -51,19 +51,19 @@ without opening the localhost dashboard or modifying the signed Codex app.
 | Connect another account | Create one new slot idempotently, then start sign-in. |
 | Explicit account | Connect only that returned account ID. |
 
-The command emits one bounded UTF-8 JSON event per line. It emits the challenge
+The command emits one bounded UTF-8 JSON event per line. It emits the sign-in URL
 before waiting, polls with bounded backoff until the server-enforced expiry, and
 emits one terminal `connected`, `failed`, `expired`, or `cancelled` event.
 Ctrl+C performs a bounded cancellation attempt. JSON encoding escapes control
-characters; codes, URLs, labels, errors, and response bodies have explicit size
+characters; URLs, labels, errors, and response bodies have explicit size
 limits.
 
 User copy stays short:
 
-- `OpenAI is open. Enter ABCD-EFGH to connect Account 2. I'll wait here.`
+- `OpenAI is open. Finish signing in to connect Account 2. I'll wait here.`
 - `Account 2 is connected. Codex Router has 2 accounts ready.`
-- `That code expired. Say "connect account" to get a new one.`
-- `I couldn't open OpenAI. Open the trusted link and enter ABCD-EFGH. I'll wait here.`
+- `That sign-in expired. Say "connect account" to try again.`
+- `I couldn't open OpenAI. Open the trusted sign-in link. I'll wait here.`
 - `Which account should I connect: Personal or Work?`
 - `Codex Router needs repair: <classified install, integrity, or start failure>. Re-run the installer, then try again.`
 - `OpenAI returned an unexpected sign-in address, so I didn't open it. Try again.`

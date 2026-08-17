@@ -2,15 +2,20 @@ package control
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/b-nnett/codex-subscription-router/internal/mux"
+	"github.com/b-nnett/codex-subscription-router/internal/state"
 )
+
+const testBrowserLoginURL = "https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"
 
 func TestPresentLoginOnlyReturnsUserCredentialAndTrustedOpenAIURL(t *testing.T) {
 	presentation := presentLogin(json.RawMessage(`{"userCode":"ABCD-EFGH","deviceCode":"private-polling-secret","verificationUrl":"https://auth.openai.com/codex/device"}`))
@@ -30,6 +35,11 @@ func TestPresentLoginOnlyReturnsUserCredentialAndTrustedOpenAIURL(t *testing.T) 
 		t.Fatalf("untrusted login destination was not removed: %#v", untrusted)
 	}
 
+	browser := presentLogin(json.RawMessage(`{"type":"chatgpt","loginId":"login-1","authUrl":"` + testBrowserLoginURL + `"}`))
+	if browser.UserCode != "" || !TrustedOpenAIBrowserLoginURL(browser.VerificationURL) {
+		t.Fatalf("browser login URL was not presented safely: %#v", browser)
+	}
+
 	event := presentEvent(mux.Event{Type: "account-login", Data: mux.LoginAttempt{ID: "login-1", Result: json.RawMessage(`{"deviceCode":"private-polling-secret"}`)}})
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
@@ -37,6 +47,21 @@ func TestPresentLoginOnlyReturnsUserCredentialAndTrustedOpenAIURL(t *testing.T) 
 	}
 	if strings.Contains(string(eventJSON), "private-polling-secret") || strings.Contains(string(eventJSON), "result") {
 		t.Fatalf("login event exposed provider result: %s", eventJSON)
+	}
+	providerError := `unauthorized C:\\Users\\person\\.codex\\auth.json token=secret\nnext-line`
+	presentedAttempt, err := json.Marshal(presentLoginAttempt(mux.LoginAttempt{ID: "login-2", State: mux.LoginFailed, Error: providerError}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(presentedAttempt), "person") || strings.Contains(string(presentedAttempt), "secret") || strings.Contains(string(presentedAttempt), "next-line") || !strings.Contains(string(presentedAttempt), "OpenAI account connection failed") {
+		t.Fatalf("public attempt did not sanitize provider error: %s", presentedAttempt)
+	}
+	presentedAccount, err := json.Marshal(presentAccountSnapshot(mux.AccountSnapshot{ID: "primary", Error: providerError}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(presentedAccount), "person") || strings.Contains(string(presentedAccount), "secret") || strings.Contains(string(presentedAccount), "next-line") || !strings.Contains(string(presentedAccount), "Account is unavailable") {
+		t.Fatalf("public account did not sanitize provider error: %s", presentedAccount)
 	}
 }
 
@@ -54,6 +79,34 @@ func TestTrustedOpenAIVerificationURLRejectsLookalikesAndUnsafePorts(t *testing.
 	} {
 		if TrustedOpenAIVerificationURL(untrusted) {
 			t.Fatalf("unsafe verification URL accepted: %q", untrusted)
+		}
+	}
+}
+
+func TestTrustedOpenAIBrowserLoginURLRequiresOneLoopbackCallback(t *testing.T) {
+	for _, trusted := range []string{
+		testBrowserLoginURL,
+		"https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Fauth%2Fcallback",
+		"https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2F%5B%3A%3A1%5D%3A49152%2Fauth%2Fcallback",
+	} {
+		if !TrustedOpenAIBrowserLoginURL(trusted) {
+			t.Fatalf("trusted browser login URL rejected: %s", trusted)
+		}
+	}
+	for _, untrusted := range []string{
+		"https://auth.openai.com/oauth/authorize",
+		"https://auth.openai.com/not-authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback",
+		"https://chatgpt.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback",
+		"https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=https%3A%2F%2Fattacker.example%2Fcallback",
+		"https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fwrong",
+		"https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&redirect_uri=http%3A%2F%2Flocalhost%3A2455%2Fauth%2Fcallback",
+		"https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2Flocalhost%2Fauth%2Fcallback",
+		"https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2F%2561uth%2Fcallback",
+		"https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&bad=%ZZ&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback",
+		testBrowserLoginURL + "#fragment",
+	} {
+		if TrustedOpenAIBrowserLoginURL(untrusted) {
+			t.Fatalf("unsafe browser login URL accepted: %s", untrusted)
 		}
 	}
 }
@@ -103,6 +156,95 @@ func TestTaskPresentationsDoNotExposeBackendErrors(t *testing.T) {
 	}
 	if len(combined) > 512 {
 		t.Fatalf("task presentation is unexpectedly large: %d", len(combined))
+	}
+}
+
+func TestLoginCleanupRemainsPendingInPublicPresentations(t *testing.T) {
+	attempt := mux.LoginAttempt{ID: "attempt-1", State: mux.LoginFailed, Error: "private failure", Cancelling: true}
+	public := presentLoginAttempt(attempt)
+	task := presentTaskLoginAttempt(attempt)
+	if public.State != mux.LoginPending || public.Error != "" || task.State != mux.LoginPending || task.Error != "" {
+		t.Fatalf("cleanup was exposed as retryable terminal state: public=%#v task=%#v", public, task)
+	}
+}
+
+func TestAuthenticatedAccountMutationsDoNotExposeBackendErrors(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.Open(filepath.Join(root, "state"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	multiplexer, err := mux.New(mux.Options{
+		RealExecutable: filepath.Join(root, "private-backend-secret.exe"),
+		Store:          store,
+		Output:         io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer multiplexer.Close()
+	server := New(testHost, "token", multiplexer, false)
+	cookie, csrf, _ := bootstrap(t, server)
+
+	requestMutation := func(method, target, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, "http://"+testHost+target, strings.NewReader(body))
+		req.Host = testHost
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", "http://"+testHost)
+		req.Header.Set("X-Codex-Mux-CSRF", csrf)
+		req.AddCookie(cookie)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, req)
+		return response
+	}
+
+	for name, test := range map[string]struct {
+		response *httptest.ResponseRecorder
+		expected string
+	}{
+		"add":         {requestMutation(http.MethodPost, "/v1/accounts", `{"label":"Work","idempotencyKey":"redaction-add"}`), "Account could not be added"},
+		"update":      {requestMutation(http.MethodPatch, "/v1/accounts/primary", `{"enabled":true}`), "Account could not be updated"},
+		"disconnect":  {requestMutation(http.MethodPost, "/v1/accounts/primary/logout", `{}`), "Account could not be disconnected"},
+		"remove":      {requestMutation(http.MethodDelete, "/v1/accounts/primary", `{}`), "Account could not be removed"},
+		"import":      {requestMutation(http.MethodPost, "/v1/accounts/primary/import/codex-lb", `{"export":{},"sourcePaused":true}`), "Account import failed"},
+		"list resets": {requestMutation(http.MethodGet, "/v1/accounts/primary/rate-limit-resets", ``), "Usage resets are unavailable"},
+		"apply reset": {requestMutation(http.MethodPost, "/v1/accounts/primary/rate-limit-resets/consume", `{"redeemRequestId":"redaction-reset"}`), "Usage reset could not be applied"},
+	} {
+		body := test.response.Body.String()
+		if test.response.Code < 400 || strings.Contains(body, "private-backend-secret") || strings.Contains(body, root) || !strings.Contains(body, test.expected) {
+			t.Fatalf("%s response exposed backend details: status=%d body=%s", name, test.response.Code, body)
+		}
+	}
+}
+
+func TestAuthenticatedProfileAndThreadErrorsDoNotExposeBackendDetails(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.Open(filepath.Join(root, "state"), filepath.Join(root, "private-auth-path"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	multiplexer, err := mux.New(mux.Options{RealExecutable: filepath.Join(root, "backend.exe"), Store: store, Output: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer multiplexer.Close()
+	server := New(testHost, "token", multiplexer, false)
+	cookie, _, _ := bootstrap(t, server)
+
+	for name, target := range map[string]string{
+		"profile": "/v1/profile/combined?accountId=private-secret",
+		"thread":  "/v1/thread-account?threadId=private-secret",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+target, nil)
+		req.Host = testHost
+		req.AddCookie(cookie)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, req)
+		body := response.Body.String()
+		if response.Code < 400 || strings.Contains(body, "private-secret") || strings.Contains(body, root) || strings.Contains(body, "auth-path") {
+			t.Fatalf("%s response exposed backend details: status=%d body=%s", name, response.Code, body)
+		}
 	}
 }
 

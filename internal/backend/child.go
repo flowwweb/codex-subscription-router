@@ -25,9 +25,10 @@ const (
 )
 
 type Inbound struct {
-	AccountID string
-	Message   protocol.Message
-	Raw       []byte
+	AccountID  string
+	Generation uint64
+	Message    protocol.Message
+	Raw        []byte
 }
 
 type response struct {
@@ -37,16 +38,18 @@ type response struct {
 
 // Child owns one real Codex app-server process and one isolated CODEX_HOME.
 type Child struct {
-	accountID string
-	exe       string
-	args      []string
-	env       []string
-	inbound   chan<- Inbound
+	accountID  string
+	generation uint64
+	exe        string
+	args       []string
+	env        []string
+	inbound    chan<- Inbound
 
 	command    *exec.Cmd
 	tree       *processgroup.Tree
 	stdin      io.WriteCloser
 	writeMu    sync.Mutex
+	admission  sync.RWMutex
 	pendingMu  sync.Mutex
 	pending    map[string]chan response
 	sequence   atomic.Uint64
@@ -59,7 +62,7 @@ type Child struct {
 	shutdownMu sync.Mutex
 }
 
-func Start(accountID, codexHome, executable string, args, baseEnv []string, inbound chan<- Inbound) (*Child, error) {
+func Start(accountID string, generation uint64, codexHome, executable string, args, baseEnv []string, inbound chan<- Inbound) (*Child, error) {
 	env := withEnvironment(baseEnv, "CODEX_HOME", codexHome)
 	env = withEnvironment(env, "CODEX_SQLITE_HOME", codexHome)
 	command := exec.Command(executable, args...)
@@ -76,15 +79,16 @@ func Start(accountID, codexHome, executable string, args, baseEnv []string, inbo
 	command.Stderr = os.Stderr
 
 	child := &Child{
-		accountID: accountID,
-		exe:       executable,
-		args:      append([]string(nil), args...),
-		env:       env,
-		inbound:   inbound,
-		command:   command,
-		stdin:     stdin,
-		pending:   make(map[string]chan response),
-		done:      make(chan struct{}),
+		accountID:  accountID,
+		generation: generation,
+		exe:        executable,
+		args:       append([]string(nil), args...),
+		env:        env,
+		inbound:    inbound,
+		command:    command,
+		stdin:      stdin,
+		pending:    make(map[string]chan response),
+		done:       make(chan struct{}),
 	}
 	if err := command.Start(); err != nil {
 		return nil, fmt.Errorf("start Codex app-server for %s: %w", accountID, err)
@@ -105,6 +109,10 @@ func (c *Child) AccountID() string {
 	return c.accountID
 }
 
+func (c *Child) Generation() uint64 {
+	return c.generation
+}
+
 func (c *Child) Send(message protocol.Message) error {
 	encoded, err := protocol.Encode(message)
 	if err != nil {
@@ -114,6 +122,12 @@ func (c *Child) Send(message protocol.Message) error {
 }
 
 func (c *Child) SendRaw(encoded []byte) error {
+	c.admission.RLock()
+	defer c.admission.RUnlock()
+	return c.sendRawAccepted(encoded)
+}
+
+func (c *Child) sendRawAccepted(encoded []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	select {
@@ -128,6 +142,7 @@ func (c *Child) SendRaw(encoded []byte) error {
 }
 
 func (c *Child) Request(ctx context.Context, method string, params json.RawMessage) (protocol.Message, error) {
+	c.admission.RLock()
 	id := protocol.StringID("__codex_mux_" + strconv.FormatUint(c.sequence.Add(1), 10))
 	key := protocol.RequestIDKey(id)
 	responses := make(chan response, 1)
@@ -135,10 +150,18 @@ func (c *Child) Request(ctx context.Context, method string, params json.RawMessa
 	c.pending[key] = responses
 	c.pendingMu.Unlock()
 
-	if err := c.Send(protocol.Request(method, id, params)); err != nil {
+	encoded, encodeErr := protocol.Encode(protocol.Request(method, id, params))
+	if encodeErr != nil {
+		c.admission.RUnlock()
+		c.removePending(key)
+		return protocol.Message{}, encodeErr
+	}
+	if err := c.sendRawAccepted(encoded); err != nil {
+		c.admission.RUnlock()
 		c.removePending(key)
 		return protocol.Message{}, err
 	}
+	c.admission.RUnlock()
 	select {
 	case received := <-responses:
 		if received.err != nil {
@@ -158,6 +181,8 @@ func (c *Child) Request(ctx context.Context, method string, params json.RawMessa
 }
 
 func (c *Child) Close() error {
+	c.admission.Lock()
+	defer c.admission.Unlock()
 	c.shutdownMu.Lock()
 	defer c.shutdownMu.Unlock()
 	if c.command.Process == nil {
@@ -222,7 +247,7 @@ func (c *Child) readLoop(stdout io.Reader) {
 				continue
 			}
 		}
-		c.inbound <- Inbound{AccountID: c.accountID, Message: message, Raw: raw}
+		c.inbound <- Inbound{AccountID: c.accountID, Generation: c.generation, Message: message, Raw: raw}
 	}
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintf(os.Stderr, "codex-mux: read %s app-server: %v\n", c.accountID, err)

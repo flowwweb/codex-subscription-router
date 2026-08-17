@@ -30,7 +30,7 @@ binaries or a prebuilt application.
 - **Automatic failover.** A depleted thread continues through another account
   with quota; if the whole pool is empty, the app shows one combined alert.
 - **Native account management.** The existing profile menu shows pooled usage,
-  profile photos, plan names, masked emails, and device-code sign-in.
+  profile photos, plan names, masked emails, and browser sign-in.
 - **Account-aware settings.** Profile statistics can be viewed together or per
   subscription, while the Plugins page can switch Apps and MCP connections
   between accounts.
@@ -230,7 +230,7 @@ request Automation access the first time Computer Use controls another app.
 ### Windows
 
 The installer opens the local dashboard automatically. Select **Connect
-subscription**, complete the ChatGPT device-code sign-in, then add the next
+subscription**, complete the ChatGPT browser sign-in, then add the next
 subscription. Existing codex-lb users can expand **Use subscriptions already
 connected in codex-lb**, export each account as Codex auth JSON, pause codex-lb
 routing for those accounts, and import all exports together. This is a one-time
@@ -246,15 +246,15 @@ backup under that subscription's account home.
 
 1. Open the profile menu at the bottom of the sidebar.
 2. Select **Add another subscription**.
-3. Complete the displayed device-code sign-in in your browser.
+3. Complete the ChatGPT sign-in in your browser.
 4. Return to Codex Subscription Router and wait for the account row to appear.
 
-While the code is visible, clicking away does not dismiss the menu. Clicking
-the code copies it and opens the verification page.
+While sign-in is active, clicking away does not dismiss the menu. Select
+**Continue sign-in** to reopen the ChatGPT page.
 
 The profile menu displays combined weekly usage followed by one row per
-subscription. Email addresses remain masked until hovered. The final row always
-starts another sign-in.
+subscription. Email addresses remain masked until hovered. The final row
+connects a subscription or retries one that still needs sign-in.
 
 ## Routing behavior
 

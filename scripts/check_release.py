@@ -117,6 +117,26 @@ def main() -> int:
     if MACOS_USER_PREFIX in readme:
         fail("README.md contains a machine-specific macOS user path")
 
+    account_menu = (ROOT / "ui/account-menu.js").read_text(encoding="utf-8")
+    for contract in (
+        'mode: "chatgpt"',
+        "codexMuxReadLoginTerminal",
+        'request(`/login-attempts/${encodeURIComponent(attemptId)}`)',
+        "loginAttemptId",
+        "loginError",
+        "idempotencyKey: codexMuxRequestKey()",
+        "codexMuxTrustedBrowserLoginURL",
+        'getAll("redirect_uri")',
+        'callback.pathname === "/auth/callback"',
+        "!loading && !login",
+    ):
+        if contract not in account_menu:
+            fail(f"Codex account menu is missing browser OAuth contract: {contract}")
+    if 'mode: "chatgptDeviceCode"' in account_menu:
+        fail("Codex account menu still defaults to device-code authorization")
+    if "EventSource" in account_menu or "?token=" in account_menu:
+        fail("Codex account menu exposes authentication in an event-stream URL")
+
     for relative in CURATED_SCREENSHOTS:
         path = ROOT / relative
         if not path.is_file() or path.stat().st_size == 0:

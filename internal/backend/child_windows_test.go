@@ -51,7 +51,7 @@ func TestBackendGrandchildProcess(t *testing.T) {
 func TestCloseTerminatesWindowsBackendDescendants(t *testing.T) {
 	environment := append(os.Environ(), "CODEX_MUX_TREE_HELPER=1")
 	child, err := Start(
-		"tree-test", t.TempDir(), os.Args[0],
+		"tree-test", 1, t.TempDir(), os.Args[0],
 		[]string{"-test.run=TestBackendTreeHelperProcess", "--"},
 		environment, make(chan Inbound, 8),
 	)

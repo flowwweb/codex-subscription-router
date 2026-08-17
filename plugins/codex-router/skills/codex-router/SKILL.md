@@ -14,7 +14,7 @@ Use the installed launcher only. Status is the default action. Keep a connection
 - Add `-NewAccount` only for "connect another OpenAI account."
 - Add `-AccountId` only with an exact account ID returned by the current status result. Never pass a user-provided label, ID, path, URL, or other arbitrary string.
 - Never read router tokens or auth files, call loopback endpoints, open the localhost dashboard, patch the native Codex app, or reconstruct private router requests.
-- Never print tokens, raw provider payloads, `device_code`, cookies, or auth-file contents.
+- Never print tokens, raw provider payloads, authorization codes, cookies, or auth-file contents.
 - Treat only HTTPS verification URLs on `chatgpt.com`, its subdomains, `auth.openai.com`, or its subdomains as trusted. The launcher performs the browser open; never open a different URL yourself.
 
 ## Invoke the launcher
@@ -59,10 +59,10 @@ Run status, then invoke `-Action Connect -NewAccount`. Do not reuse an existing 
 
 Use only sanitized public fields emitted by the launcher. Keep account IDs internal. Do not claim the browser identity was selected or switched; OpenAI's page determines which identity signs in.
 
-- Challenge: `OpenAI is open. Enter ABCD-EFGH to connect Account 2. I'll wait here.`
+- Sign-in: `OpenAI is open. Finish signing in to connect Account 2. I'll wait here.`
 - Connected: `Account 2 is connected. Codex Router has 2 accounts ready.`
-- Expired: `That code expired. Say "connect account" to get a new one.`
-- Browser-open failure: `I couldn't open OpenAI. Open the trusted link and enter ABCD-EFGH. I'll wait here.`
+- Expired: `That sign-in expired. Say "connect account" to try again.`
+- Browser-open failure: `I couldn't open OpenAI. Open the trusted sign-in link. I'll wait here.`
 - Ambiguous selection: `Which account should I connect: Personal or Work?`
 - Install, integrity, or start failure: `Codex Router needs repair: <classified reason>. Re-run the installer, then try again.`
 - Unexpected URL: `OpenAI returned an unexpected sign-in address, so I didn't open it. Try again.`

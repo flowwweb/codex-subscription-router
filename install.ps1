@@ -251,6 +251,7 @@ $launchScript = Join-Path $versionRoot "launch-router.ps1"
 $dashboardScript = Join-Path $versionRoot "open-dashboard.ps1"
 $versionConnectScript = Join-Path $versionRoot "connect-account.ps1"
 $connectScript = Join-Path $installRoot "Connect Codex Router Account.ps1"
+$publishVersionScript = Join-Path $sourceRoot "scripts\windows\publish-version.ps1"
 
 New-Item -ItemType Directory -Force -Path $installRoot,$stateRoot,$primaryCodexHome,$versionsRoot,$stagingRoot | Out-Null
 
@@ -263,13 +264,8 @@ try {
 } finally {
     Pop-Location
 }
-if (Test-Path -LiteralPath $versionRoot) { Fail "version directory already exists: $versionRoot" }
-Move-Item -LiteralPath $stagingRoot -Destination $versionRoot
+& $publishVersionScript -StagingRoot $stagingRoot -VersionRoot $versionRoot -ScriptsRoot (Join-Path $sourceRoot "scripts\windows")
 $muxHash = (Get-FileHash -LiteralPath $muxExecutable -Algorithm SHA256).Hash
-Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\start-router.ps1") -Destination $startScript
-Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\launch-router.ps1") -Destination $launchScript
-Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\open-dashboard.ps1") -Destination $dashboardScript
-Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\connect-account.ps1") -Destination $versionConnectScript
 
 $config = [ordered]@{
     schemaVersion = 2

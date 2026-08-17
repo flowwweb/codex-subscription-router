@@ -239,15 +239,15 @@ func runConnectAccount(args []string) error {
 	if err := client.request(ctx, http.MethodPost, "/v1/task-actions/connect-account", input, &started); err != nil {
 		return err
 	}
-	if !control.TrustedOpenAIVerificationURL(started.Login.VerificationURL) || started.Login.UserCode == "" {
-		return errors.New("router returned an untrusted OpenAI verification challenge")
+	if !control.TrustedOpenAIBrowserLoginURL(started.Login.VerificationURL) {
+		return errors.New("router returned an untrusted OpenAI sign-in URL")
 	}
 	if !safeOpaqueID(started.Attempt.ID) {
 		return errors.New("router returned an invalid connection attempt")
 	}
 	encoder := json.NewEncoder(taskCommandOutput)
 	if err := encoder.Encode(map[string]any{
-		"event": "verification_required", "account": started.Account.Label,
+		"event": "sign_in_required", "account": started.Account.Label,
 		"userCode": started.Login.UserCode, "verificationUrl": started.Login.VerificationURL,
 		"expiresAt": started.Attempt.ExpiresAt,
 	}); err != nil {
@@ -282,8 +282,8 @@ func runConnectAccount(args []string) error {
 			case "succeeded":
 				return encoder.Encode(map[string]any{"event": "connected", "account": started.Account.Label})
 			case "expired":
-				_ = encoder.Encode(map[string]any{"event": "expired", "message": "The OpenAI verification code expired. Run connect account again."})
-				return reported(errors.New("OpenAI verification expired"))
+				_ = encoder.Encode(map[string]any{"event": "expired", "message": "The OpenAI sign-in expired. Run connect account again."})
+				return reported(errors.New("OpenAI sign-in expired"))
 			case "cancelled":
 				return encoder.Encode(map[string]any{"event": "cancelled"})
 			default:
@@ -334,7 +334,7 @@ func clientIdempotencyKey() (string, error) {
 }
 
 func openTrustedURL(value string) error {
-	if !control.TrustedOpenAIVerificationURL(value) {
+	if !control.TrustedOpenAIBrowserLoginURL(value) {
 		return errors.New("refused an untrusted verification URL")
 	}
 	var command *exec.Cmd

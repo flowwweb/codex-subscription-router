@@ -79,8 +79,8 @@ JSON, logs, telemetry, themes, or profile decoration.
 
 The page must work at 320 CSS pixels and 200% zoom, have 44px targets, visible
 keyboard focus, text equivalents for usage, polite live login updates, reduced
-motion support, and high-contrast/forced-colors support. A device code must be
-selectable and usable without copying.
+motion support, and high-contrast/forced-colors support. Browser sign-in must
+remain usable when the page needs to be reopened.
 
 ## codex-lb migration contract
 
@@ -102,7 +102,7 @@ refresh copied credentials. V2 therefore:
 - keeps the backup until the user confirms the new router works;
 - documents how to resume codex-lb if the migration is rolled back.
 
-If codex-lb is unavailable, setup falls back to normal ChatGPT device-code
+If codex-lb is unavailable, setup falls back to normal ChatGPT browser OAuth
 login. The audit did not find a running local codex-lb instance, so real
 migration remains unverified until that service and its authenticated session
 are available.
@@ -127,4 +127,3 @@ agree on the exact artifact. Minimum proof:
   account state;
 - codex-lb migration proof only if its local authenticated service is available;
 - no claim of official Windows GUI routing without separate runtime evidence.
-

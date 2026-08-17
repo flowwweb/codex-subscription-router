@@ -30,7 +30,11 @@
     if (state.csrf && options.method && options.method !== 'GET') headers.set('X-Codex-Mux-CSRF', state.csrf);
     const response = await fetch(url, { ...options, headers, credentials: 'same-origin' });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+    if (!response.ok) {
+      const error = new Error(payload.error || `Request failed (${response.status})`);
+      error.status = response.status;
+      throw error;
+    }
     return payload;
   }
 
@@ -194,8 +198,10 @@
   }
 
   async function updateAccount(id, change) {
-    try { await api(`/v1/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(change) }); await loadAccounts(); }
-    catch (error) { announce(error.message, true); await loadAccounts().catch(() => {}); }
+    try { await api(`/v1/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(change) }); }
+    catch (error) { announce(requestFailureMessage(error, 'This account could not be updated. Try again.'), true); return; }
+    try { await loadAccounts(); }
+    catch (_) { render(); announce('Account updated. The account list could not refresh; reopen Codex Router.', true); }
   }
 
   function renameAccount(account) {
@@ -204,16 +210,22 @@
   }
 
   function loginDetails(login) {
-    return { code: login?.userCode || '', uri: trustedVerificationURL(login?.verificationUrl) };
+    return { code: login?.userCode || '', uri: codexMuxTrustedBrowserLoginURL(login?.verificationUrl) };
   }
 
-  function trustedVerificationURL(value) {
+  function codexMuxTrustedBrowserLoginURL(value) {
     if (!value) return '';
     try {
       const destination = new URL(value);
-      const hostname = destination.hostname.toLowerCase();
-      const trustedHost = hostname === 'chatgpt.com' || hostname.endsWith('.chatgpt.com') || hostname === 'auth.openai.com' || hostname.endsWith('.auth.openai.com');
-      return destination.protocol === 'https:' && trustedHost ? destination.href : '';
+      const validOuterEncoding = !/%(?![0-9a-f]{2})/i.test(destination.search);
+      const redirects = destination.searchParams.getAll('redirect_uri');
+      const trustedDestination = destination.protocol === 'https:' && destination.hostname === 'auth.openai.com' && !destination.username && !destination.password && (!destination.port || destination.port === '443') && destination.pathname === '/oauth/authorize' && !destination.hash && validOuterEncoding && destination.searchParams.getAll('response_type').length === 1 && destination.searchParams.get('response_type') === 'code' && destination.searchParams.getAll('code_challenge_method').length === 1 && destination.searchParams.get('code_challenge_method') === 'S256' && destination.searchParams.getAll('state').length === 1 && Boolean(destination.searchParams.get('state')) && destination.searchParams.getAll('code_challenge').length === 1 && Boolean(destination.searchParams.get('code_challenge'));
+      if (!trustedDestination || redirects.length !== 1) return '';
+      const callback = new URL(redirects[0]);
+      const loopback = callback.hostname === 'localhost' || callback.hostname === '127.0.0.1' || callback.hostname === '[::1]';
+      const port = Number(callback.port);
+      const trustedCallback = callback.protocol === 'http:' && loopback && Number.isInteger(port) && port > 0 && port <= 65535 && callback.pathname === '/auth/callback' && !callback.search && !callback.hash && !callback.username && !callback.password;
+      return trustedCallback ? destination.href : '';
     } catch (_) {
       return '';
     }
@@ -237,32 +249,67 @@
     if (loginDialog.open) loginDialog.close();
   }
 
+  function requestFailureMessage(error, fallback) {
+    if (error?.status === 401) return 'Dashboard access expired. Open Codex Router again.';
+    return fallback;
+  }
+
+  function loginFailureMessage(error, stateName = 'failed') {
+    if (error?.status === 401) return requestFailureMessage(error, '');
+    const detail = String(error?.message || error || '').toLowerCase();
+    if (stateName === 'cancelled') return 'Sign-in cancelled.';
+    if (stateName === 'expired') return 'Sign-in expired. Try connecting again.';
+    if (detail.includes('unauthorized') || detail.includes('authoriz')) {
+      return 'ChatGPT did not authorize this account. Try connecting again.';
+    }
+    return 'This account did not connect. Try connecting again.';
+  }
+
   async function connectAccount(id) {
-    if (state.pending.has(id)) return;
+    if (state.pending.has(id)) return true;
     const idempotencyKey = requestKey();
     state.pending.set(id, { id: '', key: idempotencyKey }); render();
     try {
-      const result = await api(`/v1/accounts/${encodeURIComponent(id)}/login`, { method: 'POST', body: JSON.stringify({ mode: 'chatgptDeviceCode', idempotencyKey }) });
+      const result = await api(`/v1/accounts/${encodeURIComponent(id)}/login`, { method: 'POST', body: JSON.stringify({ mode: 'chatgpt', idempotencyKey }) });
       state.pending.set(id, { id: result.attempt.id, key: idempotencyKey });
       const info = loginDetails(result.login || result.attempt?.result);
       showLogin(id, info.code, info.uri);
       watchLogin(id, result.attempt.id);
+      return true;
     } catch (error) {
-      state.pending.delete(id); closeLoginDialog(); render(); announce(`Couldn’t connect this account. ${error.message}`, true);
+      state.pending.delete(id); closeLoginDialog(); render(); announce(loginFailureMessage(error), true);
+      return false;
     }
   }
 
   async function watchLogin(accountId, attemptId) {
     if (!attemptId) return;
+    const active = state.pending.get(accountId);
+    if (!active || active.id !== attemptId) return;
     try {
       const result = await api(`/v1/login-attempts/${encodeURIComponent(attemptId)}`);
+      const current = state.pending.get(accountId);
+      if (!current || current.id !== attemptId) return;
       const attempt = result.attempt;
       if (attempt.state === 'pending') { setTimeout(() => watchLogin(accountId, attemptId), 1500); return; }
-      state.pending.delete(accountId); closeLoginDialog(); await loadAccounts();
-      if (attempt.state === 'succeeded') announce('Account connected and ready.');
-      else announce(`Couldn’t connect this account. ${attempt.error || `Sign-in ${attempt.state}.`} Try again.`, true);
+      state.pending.delete(accountId); closeLoginDialog();
+      const terminalMessage = attempt.state === 'succeeded'
+        ? 'Account connected and ready.'
+        : loginFailureMessage(attempt.error, attempt.state);
+      const terminalIsError = attempt.state !== 'succeeded' && attempt.state !== 'cancelled';
+      announce(terminalMessage, terminalIsError);
+      try {
+        await loadAccounts();
+        announce(terminalMessage, terminalIsError);
+      } catch (_) {
+        render();
+        announce(`${terminalMessage} The account list could not refresh; reopen Codex Router.`, true);
+      }
     } catch (error) {
-      state.pending.delete(accountId); closeLoginDialog(); render(); announce(`Sign-in status is unavailable. ${error.message}`, true);
+      const current = state.pending.get(accountId);
+      if (!current || current.id !== attemptId) return;
+      state.pending.delete(accountId); closeLoginDialog(); render();
+      announce(requestFailureMessage(error, 'Sign-in status is unavailable. Try connecting again.'), true);
     }
   }
 
@@ -273,8 +320,10 @@
     if (!pending.id) return;
     try {
       await api(`/v1/login-attempts/${encodeURIComponent(pending.id)}/cancel`, { method: 'POST', body: '{}' });
-      state.pending.delete(accountId); closeLoginDialog(); await loadAccounts(); announce('Sign-in cancelled.');
-    } catch (error) { announce(error.message, true); }
+      state.pending.delete(accountId); closeLoginDialog(); announce('Sign-in cancelled.');
+      try { await loadAccounts(); announce('Sign-in cancelled.'); }
+      catch (_) { render(); announce('Sign-in cancelled. The account list could not refresh; reopen Codex Router.', true); }
+    } catch (error) { announce(requestFailureMessage(error, 'Sign-in could not be cancelled. Try again.'), true); }
   }
 
   async function removeAccount(account) {
@@ -282,19 +331,23 @@
     try {
       await api(`/v1/accounts/${encodeURIComponent(account.id)}`, { method: 'DELETE' });
       announce('Account removed. Its local data was archived for recovery.');
-      await loadAccounts(); notice.focus();
-    } catch (error) { announce(error.message, true); }
+      try { await loadAccounts(); }
+      catch (_) { render(); announce('Account removed. The account list could not refresh; reopen Codex Router.', true); }
+      notice.focus();
+    } catch (error) { announce(requestFailureMessage(error, 'This account could not be removed. Try again.'), true); }
   }
 
   async function addOrConnect() {
-    const first = state.accounts.find((account) => !account.connected);
-    if (first) return connectAccount(first.id);
     try {
       state.addKey ||= requestKey();
       const result = await api('/v1/accounts', { method: 'POST', body: JSON.stringify({ label: `Account ${state.accounts.length + 1}`, idempotencyKey: state.addKey }) });
-      state.addKey = '';
-      await loadAccounts(); await connectAccount(result.account.id);
-    } catch (error) { announce(error.message, true); }
+      announce('Account added.');
+      let reconciled = false;
+      try { await loadAccounts(); reconciled = true; }
+      catch (_) { render(); announce('Account added. The account list could not refresh; continuing to sign-in.', true); }
+      const loginStarted = await connectAccount(result.account.id);
+      if (reconciled || loginStarted) state.addKey = '';
+    } catch (error) { announce(requestFailureMessage(error, 'A new account could not be added. Try again.'), true); }
   }
 
   function migrationSignature(files) { return files.map((file) => `${file.name}:${file.size}:${file.lastModified}`).join('|'); }
@@ -353,11 +406,13 @@
         imported += 1;
       } catch (error) {
         state.migrationInFlight = false; button.disabled = false; await loadAccounts().catch(() => {});
-        return announce(`Imported ${imported} of ${files.length}. ${item.file.name}: ${error.message}`, true, true);
+        return announce(requestFailureMessage(error, `Imported ${imported} of ${files.length}. This account could not be imported. Try again.`), true, true);
       }
     }
-    await loadAccounts(); state.migrationInFlight = false; state.migrationReview = null; button.disabled = false; button.textContent = 'Review import';
-    $('#migration-preview').hidden = true; announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported.`, false, true);
+    state.migrationInFlight = false; state.migrationReview = null; button.disabled = false; button.textContent = 'Review import';
+    $('#migration-preview').hidden = true;
+    try { await loadAccounts(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported.`, false, true); }
+    catch (_) { render(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported. The account list could not refresh; reopen Codex Router.`, true, true); }
   }
 
   function setOffline(error) {

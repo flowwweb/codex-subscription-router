@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +57,10 @@ type taskLoginAttempt struct {
 
 func presentTaskLoginAttempt(attempt mux.LoginAttempt) taskLoginAttempt {
 	presented := taskLoginAttempt{ID: attempt.ID, State: attempt.State, ExpiresAt: attempt.ExpiresAt}
+	if attempt.Cancelling && attempt.State != mux.LoginPending {
+		presented.State = mux.LoginPending
+		return presented
+	}
 	if attempt.Error != "" {
 		presented.Error = "OpenAI account connection failed"
 	}
@@ -63,10 +68,33 @@ func presentTaskLoginAttempt(attempt mux.LoginAttempt) taskLoginAttempt {
 }
 
 func presentLoginAttempt(attempt mux.LoginAttempt) publicLoginAttempt {
-	return publicLoginAttempt{
+	presented := publicLoginAttempt{
 		ID: attempt.ID, AccountID: attempt.AccountID, Mode: attempt.Mode, State: attempt.State,
-		Error: attempt.Error, StartedAt: attempt.StartedAt, UpdatedAt: attempt.UpdatedAt, ExpiresAt: attempt.ExpiresAt,
+		StartedAt: attempt.StartedAt, UpdatedAt: attempt.UpdatedAt, ExpiresAt: attempt.ExpiresAt,
 	}
+	if attempt.Cancelling && attempt.State != mux.LoginPending {
+		presented.State = mux.LoginPending
+		return presented
+	}
+	if attempt.Error != "" {
+		presented.Error = "OpenAI account connection failed"
+	}
+	return presented
+}
+
+func presentAccountSnapshot(account mux.AccountSnapshot) mux.AccountSnapshot {
+	if account.Error != "" {
+		account.Error = "Account is unavailable"
+	}
+	return account
+}
+
+func presentAccountSnapshots(accounts []mux.AccountSnapshot) []mux.AccountSnapshot {
+	presented := make([]mux.AccountSnapshot, len(accounts))
+	for index, account := range accounts {
+		presented[index] = presentAccountSnapshot(account)
+	}
+	return presented
 }
 
 func presentEvent(event mux.Event) mux.Event {
@@ -142,6 +170,54 @@ func TrustedOpenAIVerificationURL(value string) bool {
 	hostname := strings.ToLower(destination.Hostname())
 	return hostname == "chatgpt.com" || strings.HasSuffix(hostname, ".chatgpt.com") ||
 		hostname == "auth.openai.com" || strings.HasSuffix(hostname, ".auth.openai.com")
+}
+
+func TrustedOpenAIBrowserLoginURL(value string) bool {
+	if !TrustedOpenAIVerificationURL(value) {
+		return false
+	}
+	destination, err := url.ParseRequestURI(value)
+	if err != nil {
+		return false
+	}
+	if strings.ToLower(destination.Hostname()) != "auth.openai.com" || destination.EscapedPath() != "/oauth/authorize" || destination.Fragment != "" {
+		return false
+	}
+	query, err := url.ParseQuery(destination.RawQuery)
+	if err != nil {
+		return false
+	}
+	redirects := query["redirect_uri"]
+	if len(redirects) != 1 {
+		return false
+	}
+	for key, expected := range map[string]string{"response_type": "code", "code_challenge_method": "S256"} {
+		if values := query[key]; len(values) != 1 || values[0] != expected {
+			return false
+		}
+	}
+	for _, key := range []string{"state", "code_challenge"} {
+		if values := query[key]; len(values) != 1 || values[0] == "" {
+			return false
+		}
+	}
+	callback, err := url.ParseRequestURI(redirects[0])
+	if err != nil || callback.Scheme != "http" || callback.User != nil || callback.Port() == "" || callback.EscapedPath() != "/auth/callback" || callback.RawQuery != "" || callback.Fragment != "" {
+		return false
+	}
+	hostname := strings.ToLower(callback.Hostname())
+	if hostname != "localhost" && hostname != "127.0.0.1" && hostname != "::1" {
+		return false
+	}
+	port, err := strconv.Atoi(callback.Port())
+	return err == nil && port > 0 && port <= 65535
+}
+
+func trustedLoginPresentation(mode string, login loginPresentation) bool {
+	if mode == "chatgpt" {
+		return login.UserCode == "" && TrustedOpenAIBrowserLoginURL(login.VerificationURL)
+	}
+	return mode == "chatgptDeviceCode" && login.UserCode != "" && TrustedOpenAIVerificationURL(login.VerificationURL)
 }
 
 const sessionCookieName = "codex_mux_session"
@@ -297,7 +373,7 @@ func (s *Server) combinedProfile(response http.ResponseWriter, request *http.Req
 		profile, err = s.mux.AccountProfile(ctx, accountID)
 	}
 	if err != nil {
-		writeJSON(response, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		writeJSON(response, http.StatusBadGateway, map[string]any{"error": "Account profile is unavailable"})
 		return
 	}
 	writeJSON(response, http.StatusOK, profile)
@@ -365,10 +441,10 @@ func (s *Server) threadAccount(response http.ResponseWriter, request *http.Reque
 	defer cancel()
 	account, err := s.mux.ThreadAccount(ctx, threadID)
 	if err != nil {
-		writeJSON(response, http.StatusNotFound, map[string]any{"error": err.Error()})
+		writeJSON(response, http.StatusNotFound, map[string]any{"error": "Thread account is unavailable"})
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"account": account})
+	writeJSON(response, http.StatusOK, map[string]any{"account": presentAccountSnapshot(account)})
 }
 
 func (s *Server) Serve(listener net.Listener) error {
@@ -403,7 +479,7 @@ func (s *Server) accounts(response http.ResponseWriter, request *http.Request) {
 	case http.MethodGet:
 		ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
 		defer cancel()
-		writeJSON(response, http.StatusOK, map[string]any{"accounts": s.mux.Accounts(ctx)})
+		writeJSON(response, http.StatusOK, map[string]any{"accounts": presentAccountSnapshots(s.mux.Accounts(ctx))})
 	case http.MethodPost:
 		var input struct {
 			Label          string `json:"label"`
@@ -423,10 +499,10 @@ func (s *Server) accounts(response http.ResponseWriter, request *http.Request) {
 			account, err = s.mux.AddAccountIdempotent(ctx, input.Label, input.IdempotencyKey)
 		}
 		if err != nil {
-			writeJSON(response, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			writeJSON(response, http.StatusInternalServerError, map[string]any{"error": "Account could not be added"})
 			return
 		}
-		writeJSON(response, http.StatusCreated, map[string]any{"account": account})
+		writeJSON(response, http.StatusCreated, map[string]any{"account": presentAccountSnapshot(account)})
 	default:
 		methodNotAllowed(response)
 	}
@@ -544,17 +620,17 @@ func (s *Server) taskConnectAccount(response http.ResponseWriter, request *http.
 			return
 		}
 	}
-	attempt, err := s.mux.StartLoginAttempt(ctx, selected.ID, "chatgptDeviceCode", "login-"+input.IdempotencyKey)
+	attempt, err := s.mux.StartLoginAttempt(ctx, selected.ID, "chatgpt", "login-"+input.IdempotencyKey)
 	if err != nil {
 		writeJSON(response, http.StatusBadGateway, map[string]any{"error": "OpenAI did not start account verification"})
 		return
 	}
 	login := presentLogin(attempt.Result)
-	if login.UserCode == "" || login.VerificationURL == "" {
+	if !trustedLoginPresentation("chatgpt", login) {
 		cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		_, _ = s.mux.CancelLogin(cancelCtx, attempt.ID)
 		cancel()
-		writeJSON(response, http.StatusBadGateway, map[string]any{"error": "OpenAI did not return a trusted verification challenge"})
+		writeJSON(response, http.StatusBadGateway, map[string]any{"error": "OpenAI did not return a trusted sign-in URL"})
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
@@ -618,15 +694,15 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 		}
 		account, err := s.mux.UpdateAccount(ctx, accountID, input.Label, input.Enabled)
 		if err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": "Account could not be updated"})
 			return
 		}
-		writeJSON(response, http.StatusOK, map[string]any{"account": account})
+		writeJSON(response, http.StatusOK, map[string]any{"account": presentAccountSnapshot(account)})
 		return
 	}
 	if len(parts) == 1 && request.Method == http.MethodDelete {
 		if err := s.mux.RemoveAccount(accountID); err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": "Account could not be removed"})
 			return
 		}
 		writeJSON(response, http.StatusOK, map[string]any{"removed": true})
@@ -643,7 +719,7 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 		}
 		result, err := s.mux.ImportCodexLBExport(ctx, accountID, input.Export, input.SourcePaused)
 		if err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": "Account import failed"})
 			return
 		}
 		writeJSON(response, http.StatusOK, result)
@@ -652,7 +728,7 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 	if len(parts) == 2 && parts[1] == "rate-limit-resets" && request.Method == http.MethodGet {
 		result, err := s.mux.RateLimitResetCredits(ctx, accountID)
 		if err != nil {
-			writeJSON(response, http.StatusBadGateway, map[string]any{"error": err.Error()})
+			writeJSON(response, http.StatusBadGateway, map[string]any{"error": "Usage resets are unavailable"})
 			return
 		}
 		writeRawJSON(response, http.StatusOK, result)
@@ -669,7 +745,7 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 		}
 		result, err := s.mux.ConsumeRateLimitResetCredit(ctx, accountID, input.CreditID, input.RedeemRequestID)
 		if err != nil {
-			writeJSON(response, http.StatusBadGateway, map[string]any{"error": err.Error()})
+			writeJSON(response, http.StatusBadGateway, map[string]any{"error": "Usage reset could not be applied"})
 			return
 		}
 		writeRawJSON(response, http.StatusOK, result)
@@ -689,23 +765,27 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-		var attempt mux.LoginAttempt
-		var err error
 		if input.IdempotencyKey == "" {
-			var result json.RawMessage
-			result, err = s.mux.StartLogin(ctx, accountID, input.Mode)
-			attempt = mux.LoginAttempt{AccountID: accountID, Mode: input.Mode, State: mux.LoginPending, Result: result}
-		} else {
-			attempt, err = s.mux.StartLoginAttempt(ctx, accountID, input.Mode, input.IdempotencyKey)
-		}
-		if err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": "idempotencyKey is required"})
 			return
 		}
-		writeJSON(response, http.StatusOK, map[string]any{"attempt": presentLoginAttempt(attempt), "login": presentLogin(attempt.Result)})
+		attempt, err := s.mux.StartLoginAttempt(ctx, accountID, input.Mode, input.IdempotencyKey)
+		if err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": "Account sign-in could not start"})
+			return
+		}
+		login := presentLogin(attempt.Result)
+		if !trustedLoginPresentation(input.Mode, login) {
+			cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_, _ = s.mux.CancelLogin(cancelCtx, attempt.ID)
+			cancel()
+			writeJSON(response, http.StatusBadGateway, map[string]any{"error": "OpenAI did not return a trusted sign-in URL"})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"attempt": presentLoginAttempt(attempt), "login": login})
 	case "logout":
 		if err := s.mux.Logout(ctx, accountID); err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": "Account could not be disconnected"})
 			return
 		}
 		writeJSON(response, http.StatusOK, map[string]any{"ok": true})
@@ -729,7 +809,7 @@ func (s *Server) loginAttemptAction(response http.ResponseWriter, request *http.
 	case len(parts) == 1 && request.Method == http.MethodGet:
 		attempt, err := s.mux.LoginStatus(parts[0])
 		if err != nil {
-			writeJSON(response, http.StatusNotFound, map[string]any{"error": err.Error()})
+			writeJSON(response, http.StatusNotFound, map[string]any{"error": "Sign-in attempt was not found"})
 			return
 		}
 		writeJSON(response, http.StatusOK, map[string]any{"attempt": presentLoginAttempt(attempt)})
@@ -738,7 +818,7 @@ func (s *Server) loginAttemptAction(response http.ResponseWriter, request *http.
 		defer cancel()
 		attempt, err := s.mux.CancelLogin(ctx, parts[0])
 		if err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": "Sign-in cancellation could not be confirmed"})
 			return
 		}
 		writeJSON(response, http.StatusOK, map[string]any{"attempt": presentLoginAttempt(attempt)})

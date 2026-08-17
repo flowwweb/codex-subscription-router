@@ -7,6 +7,7 @@ $files = @(
     (Join-Path $root "scripts\windows\start-router.ps1"),
     (Join-Path $root "scripts\windows\open-dashboard.ps1")
     (Join-Path $root "scripts\windows\connect-account.ps1")
+    (Join-Path $root "scripts\windows\publish-version.ps1")
     (Join-Path $root "scripts\windows\verify-installed-router.ps1")
 )
 
@@ -117,6 +118,42 @@ if ($markerDecision -lt 0 -or $markerWrite -le $markerDecision) {
 }
 if ($installer -notmatch '-not \(Test-Path -LiteralPath \$primaryAclMarker -PathType Leaf\)') {
     throw "Windows installer must resume primary ACL migration when its completion marker is absent"
+}
+
+$publishVersion = Join-Path $root "scripts\windows\publish-version.ps1"
+$acceptanceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-router-publish-{0}" -f [Guid]::NewGuid().ToString("N"))
+$scriptsRoot = Join-Path $root "scripts\windows"
+$failedStaging = Join-Path $acceptanceRoot ".staging-failed"
+$retryStaging = Join-Path $acceptanceRoot ".staging-retry"
+$collisionStaging = Join-Path $acceptanceRoot ".staging-collision"
+$versionRoot = Join-Path $acceptanceRoot "version"
+New-Item -ItemType Directory -Force -Path $failedStaging,$retryStaging,$collisionStaging | Out-Null
+"fake mux" | Set-Content -LiteralPath (Join-Path $failedStaging "codex-mux.exe")
+"fake mux" | Set-Content -LiteralPath (Join-Path $retryStaging "codex-mux.exe")
+"losing mux" | Set-Content -LiteralPath (Join-Path $collisionStaging "codex-mux.exe")
+try {
+    $env:CODEX_MUX_ACCEPTANCE_TEST = "simulate-version-copy-failure"
+    try { & $publishVersion -StagingRoot $failedStaging -VersionRoot $versionRoot -ScriptsRoot $scriptsRoot; throw "simulated copy failure unexpectedly succeeded" }
+    catch { if ($_.Exception.Message -eq "simulated copy failure unexpectedly succeeded") { throw } }
+    if (Test-Path -LiteralPath $versionRoot) { throw "copy failure published a partial version" }
+    Remove-Item Env:CODEX_MUX_ACCEPTANCE_TEST -ErrorAction SilentlyContinue
+    & $publishVersion -StagingRoot $retryStaging -VersionRoot $versionRoot -ScriptsRoot $scriptsRoot
+    foreach ($name in @("codex-mux.exe", "start-router.ps1", "launch-router.ps1", "open-dashboard.ps1", "connect-account.ps1")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $versionRoot $name) -PathType Leaf)) { throw "retry published an incomplete version: $name" }
+    }
+    $winnerBytes = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes((Join-Path $versionRoot "codex-mux.exe")))
+    try { & $publishVersion -StagingRoot $collisionStaging -VersionRoot $versionRoot -ScriptsRoot $scriptsRoot; throw "colliding publish unexpectedly succeeded" }
+    catch { if ($_.Exception.Message -eq "colliding publish unexpectedly succeeded") { throw } }
+    if (-not (Test-Path -LiteralPath $collisionStaging -PathType Container)) { throw "colliding publisher lost its staging directory" }
+    if (Test-Path -LiteralPath (Join-Path $versionRoot ".staging-collision")) { throw "colliding publish nested content under the winner" }
+    if ([Convert]::ToBase64String([System.IO.File]::ReadAllBytes((Join-Path $versionRoot "codex-mux.exe"))) -ne $winnerBytes) { throw "colliding publish modified the winner" }
+} finally {
+    Remove-Item Env:CODEX_MUX_ACCEPTANCE_TEST -ErrorAction SilentlyContinue
+    $resolvedAcceptanceRoot = [System.IO.Path]::GetFullPath($acceptanceRoot)
+    $resolvedTempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if ($resolvedAcceptanceRoot.StartsWith($resolvedTempRoot, [System.StringComparison]::OrdinalIgnoreCase) -and (Split-Path -Leaf $resolvedAcceptanceRoot) -like "codex-router-publish-*") {
+        Remove-Item -LiteralPath $resolvedAcceptanceRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Output "Windows installer and launcher syntax passed"

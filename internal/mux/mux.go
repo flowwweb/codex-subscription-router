@@ -36,15 +36,17 @@ type Options struct {
 }
 
 type externalRoute struct {
-	accountID string
-	method    string
-	message   protocol.Message
-	excluded  map[string]struct{}
+	accountID  string
+	generation uint64
+	method     string
+	message    protocol.Message
+	excluded   map[string]struct{}
 }
 
 type serverRequestRoute struct {
-	accountID string
-	original  json.RawMessage
+	accountID  string
+	generation uint64
+	original   json.RawMessage
 }
 
 type Event struct {
@@ -66,6 +68,7 @@ type Multiplexer struct {
 	childrenMu  sync.RWMutex
 	children    map[string]*backend.Child
 	childStart  map[string]time.Time
+	stopping    map[string]*backend.Child
 	restarts    map[string]int
 	startMu     sync.Mutex
 	inbound     chan backend.Inbound
@@ -81,11 +84,13 @@ type Multiplexer struct {
 	initializeParams json.RawMessage
 	initialized      bool
 
-	externalMu     sync.Mutex
-	externalRoutes map[string]externalRoute
-	serverMu       sync.Mutex
-	serverRoutes   map[string]serverRequestRoute
-	serverSequence atomic.Uint64
+	externalMu      sync.Mutex
+	externalRoutes  map[string]externalRoute
+	serverMu        sync.Mutex
+	serverRoutes    map[string]serverRequestRoute
+	serverSequence  atomic.Uint64
+	childSequence   atomic.Uint64
+	watchChildDelay time.Duration
 
 	outputMu sync.Mutex
 	eventsMu sync.RWMutex
@@ -106,10 +111,12 @@ type Multiplexer struct {
 	resetPreviewMu sync.RWMutex
 	resetPreviews  map[string]ResetCreditsPreview
 
-	loginMu       sync.Mutex
-	loginAttempts map[string]LoginAttempt
-	loginKeys     map[string]string
-	loginReady    map[string]chan struct{}
+	loginMu           sync.Mutex
+	loginAttempts     map[string]LoginAttempt
+	loginKeys         map[string]string
+	loginReady        map[string]chan struct{}
+	loginByProviderID map[string]string
+	loginSequence     atomic.Uint64
 }
 
 func New(options Options) (*Multiplexer, error) {
@@ -125,6 +132,7 @@ func New(options Options) (*Multiplexer, error) {
 		output:               options.Output,
 		children:             make(map[string]*backend.Child),
 		childStart:           make(map[string]time.Time),
+		stopping:             make(map[string]*backend.Child),
 		restarts:             make(map[string]int),
 		inbound:              make(chan backend.Inbound, 1024),
 		runCtx:               runCtx,
@@ -141,6 +149,7 @@ func New(options Options) (*Multiplexer, error) {
 		loginAttempts:        make(map[string]LoginAttempt),
 		loginKeys:            make(map[string]string),
 		loginReady:           make(map[string]chan struct{}),
+		loginByProviderID:    make(map[string]string),
 	}, nil
 }
 
@@ -203,6 +212,7 @@ func (m *Multiplexer) Close() {
 		m.runCancel()
 		m.lifecycleMu.Unlock()
 		m.runWG.Wait()
+		m.startMu.Lock()
 		m.childrenMu.Lock()
 		children := make([]*backend.Child, 0, len(m.children))
 		for accountID, child := range m.children {
@@ -220,6 +230,7 @@ func (m *Multiplexer) Close() {
 			}(child)
 		}
 		wait.Wait()
+		m.startMu.Unlock()
 	})
 }
 
@@ -365,10 +376,11 @@ func (m *Multiplexer) forwardWithExclusions(accountID string, message protocol.M
 	key := protocol.RequestIDKey(message.ID)
 	m.externalMu.Lock()
 	m.externalRoutes[key] = externalRoute{
-		accountID: accountID,
-		method:    message.Method,
-		message:   message,
-		excluded:  cloneAccountSet(excluded),
+		accountID:  accountID,
+		generation: child.Generation(),
+		method:     message.Method,
+		message:    message,
+		excluded:   cloneAccountSet(excluded),
 	}
 	m.externalMu.Unlock()
 	if err := child.Send(message); err != nil {
@@ -496,7 +508,7 @@ func (m *Multiplexer) handleServerRequestResponse(message protocol.Message) {
 		return
 	}
 	message.ID = route.original
-	if child, exists := m.child(route.accountID); exists {
+	if child, exists := m.child(route.accountID); exists && child.Generation() == route.generation {
 		_ = child.Send(message)
 	}
 }
@@ -513,12 +525,19 @@ func (m *Multiplexer) inboundLoop(ctx context.Context) {
 }
 
 func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
+	m.childrenMu.RLock()
+	current := m.children[inbound.AccountID]
+	currentGeneration := current != nil && current.Generation() == inbound.Generation
+	m.childrenMu.RUnlock()
+	if !currentGeneration {
+		return
+	}
 	message := inbound.Message
 	if message.Method == "" && len(message.ID) > 0 {
 		key := protocol.RequestIDKey(message.ID)
 		m.externalMu.Lock()
 		route, ok := m.externalRoutes[key]
-		if ok {
+		if ok && route.accountID == inbound.AccountID && route.generation == inbound.Generation {
 			delete(m.externalRoutes, key)
 		}
 		m.externalMu.Unlock()
@@ -545,9 +564,10 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 			_ = m.store.SetThreadOwner(threadID, inbound.AccountID)
 		}
 	}
-	if message.Method == "turn/completed" ||
-		message.Method == "account/login/completed" ||
-		message.Method == "account/updated" {
+	if message.Method == "account/login/completed" {
+		go m.handleLoginCompleted(inbound.AccountID, inbound.Generation, message.Params)
+		return
+	} else if message.Method == "turn/completed" || message.Method == "account/updated" {
 		go m.publishAccountRefresh(inbound.AccountID)
 	}
 	if m.shouldForwardNotification(inbound.AccountID, message.Method) {
@@ -595,12 +615,35 @@ func (m *Multiplexer) forwardServerRequest(inbound backend.Inbound) {
 	key := protocol.RequestIDKey(newID)
 	m.serverMu.Lock()
 	m.serverRoutes[key] = serverRequestRoute{
-		accountID: inbound.AccountID,
-		original:  append(json.RawMessage(nil), inbound.Message.ID...),
+		accountID:  inbound.AccountID,
+		generation: inbound.Generation,
+		original:   append(json.RawMessage(nil), inbound.Message.ID...),
 	}
 	m.serverMu.Unlock()
 	inbound.Message.ID = newID
 	m.write(inbound.Message)
+}
+
+func (m *Multiplexer) failRoutesForChild(accountID string, generation uint64) {
+	m.externalMu.Lock()
+	failed := make([]protocol.Message, 0)
+	for key, route := range m.externalRoutes {
+		if route.accountID == accountID && route.generation == generation {
+			failed = append(failed, route.message)
+			delete(m.externalRoutes, key)
+		}
+	}
+	m.externalMu.Unlock()
+	m.serverMu.Lock()
+	for key, route := range m.serverRoutes {
+		if route.accountID == accountID && route.generation == generation {
+			delete(m.serverRoutes, key)
+		}
+	}
+	m.serverMu.Unlock()
+	for _, message := range failed {
+		m.write(protocol.Failure(message.ID, -32023, "subscription backend stopped before responding"))
+	}
 }
 
 func (m *Multiplexer) shouldForwardNotification(accountID, method string) bool {
@@ -653,7 +696,7 @@ func (m *Multiplexer) childEntries() []childEntry {
 		if !account.Enabled {
 			continue
 		}
-		if child := m.children[account.ID]; child != nil {
+		if child := m.children[account.ID]; child != nil && m.stopping[account.ID] != child {
 			entries = append(entries, childEntry{account: account, child: child})
 		}
 	}
@@ -664,6 +707,9 @@ func (m *Multiplexer) child(accountID string) (*backend.Child, bool) {
 	m.childrenMu.RLock()
 	defer m.childrenMu.RUnlock()
 	child, ok := m.children[accountID]
+	if ok && m.stopping[accountID] == child {
+		return nil, false
+	}
 	return child, ok
 }
 
@@ -688,6 +734,12 @@ func (m *Multiplexer) startChildInternal(ctx context.Context, account state.Acco
 	if child, ok := m.child(account.ID); ok {
 		return child, nil
 	}
+	m.childrenMu.RLock()
+	stopping := m.stopping[account.ID] != nil
+	m.childrenMu.RUnlock()
+	if stopping {
+		return nil, fmt.Errorf("account %q backend is still stopping", account.ID)
+	}
 	select {
 	case <-m.runCtx.Done():
 		return nil, errors.New("multiplexer is closed")
@@ -695,6 +747,7 @@ func (m *Multiplexer) startChildInternal(ctx context.Context, account state.Acco
 	}
 	child, err := backend.Start(
 		account.ID,
+		m.childSequence.Add(1),
 		account.CodexHome,
 		m.realExecutable,
 		m.realArgs,
@@ -721,6 +774,17 @@ func (m *Multiplexer) startChildInternal(ctx context.Context, account state.Acco
 			_ = child.Send(protocol.Message{Method: "initialized"})
 		}
 	}
+	currentAccount, accountExists := m.store.Account(account.ID)
+	select {
+	case <-m.runCtx.Done():
+		_ = child.Close()
+		return nil, errors.New("multiplexer is closed")
+	default:
+	}
+	if !accountExists || (account.Enabled && !currentAccount.Enabled) {
+		_ = child.Close()
+		return nil, fmt.Errorf("account %q changed while its backend was starting", account.ID)
+	}
 	m.childrenMu.Lock()
 	m.children[account.ID] = child
 	m.childStart[account.ID] = time.Now()
@@ -733,25 +797,88 @@ func (m *Multiplexer) startChildInternal(ctx context.Context, account state.Acco
 }
 
 func (m *Multiplexer) stopChild(accountID string) error {
+	return m.stopChildInternal(accountID, 0)
+}
+
+func (m *Multiplexer) stopChildGeneration(accountID string, generation uint64) error {
+	return m.stopChildInternal(accountID, generation)
+}
+
+func (m *Multiplexer) hasChildGeneration(accountID string, generation uint64) bool {
+	m.childrenMu.Lock()
+	defer m.childrenMu.Unlock()
+	child := m.children[accountID]
+	return child != nil && child.Generation() == generation
+}
+
+func (m *Multiplexer) stopChildInternal(accountID string, expectedGeneration uint64) error {
+	m.startMu.Lock()
 	m.childrenMu.Lock()
 	child := m.children[accountID]
+	if expectedGeneration != 0 && (child == nil || child.Generation() != expectedGeneration) {
+		m.childrenMu.Unlock()
+		m.startMu.Unlock()
+		return nil
+	}
 	if child != nil {
-		delete(m.children, accountID)
-		delete(m.childStart, accountID)
+		m.stopping[accountID] = child
 	}
 	m.restarts[accountID] = 0
 	m.childrenMu.Unlock()
 	if child == nil {
+		m.startMu.Unlock()
 		return nil
 	}
-	return child.Close()
+	closeErr := child.Close()
+	select {
+	case <-child.Done():
+		m.childrenMu.Lock()
+		won := m.children[accountID] == child && m.stopping[accountID] == child
+		if won {
+			delete(m.children, accountID)
+			delete(m.childStart, accountID)
+		}
+		m.childrenMu.Unlock()
+		if won {
+			m.confirmChildExit(accountID, child.Generation())
+			m.childrenMu.Lock()
+			if m.stopping[accountID] == child {
+				delete(m.stopping, accountID)
+			}
+			m.childrenMu.Unlock()
+			m.startMu.Unlock()
+			m.releaseLoginCleanup(accountID, child.Generation())
+		} else {
+			m.startMu.Unlock()
+		}
+		return nil
+	default:
+		m.startMu.Unlock()
+		return closeErr
+	}
 }
 
 func (m *Multiplexer) watchChild(accountID string, child *backend.Child) {
 	<-child.Done()
+	if m.watchChildDelay > 0 {
+		time.Sleep(m.watchChildDelay)
+	}
 	m.childrenMu.Lock()
 	if m.children[accountID] != child {
 		m.childrenMu.Unlock()
+		return
+	}
+	if m.stopping[accountID] == child {
+		delete(m.children, accountID)
+		delete(m.childStart, accountID)
+		m.childrenMu.Unlock()
+		m.confirmChildExit(accountID, child.Generation())
+		m.childrenMu.Lock()
+		if m.stopping[accountID] == child {
+			delete(m.stopping, accountID)
+		}
+		m.childrenMu.Unlock()
+		m.releaseLoginCleanup(accountID, child.Generation())
 		return
 	}
 	started := m.childStart[accountID]
@@ -761,6 +888,8 @@ func (m *Multiplexer) watchChild(accountID string, child *backend.Child) {
 		m.restarts[accountID] = 0
 	}
 	m.childrenMu.Unlock()
+	m.confirmChildExit(accountID, child.Generation())
+	m.releaseLoginCleanup(accountID, child.Generation())
 
 	select {
 	case <-m.runCtx.Done():
@@ -839,9 +968,6 @@ func (m *Multiplexer) publishAccountRefresh(accountID string) {
 	defer cancel()
 	snapshot, err := m.accountSnapshot(ctx, accountID)
 	if err == nil {
-		if snapshot.Connected {
-			m.completeLoginAttempts(accountID)
-		}
 		m.publish(Event{Type: "account-updated", AccountID: accountID, Data: snapshot})
 	}
 }

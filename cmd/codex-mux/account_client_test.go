@@ -28,6 +28,7 @@ func TestTaskClientFakeBackend(t *testing.T) {
 		return
 	}
 	connected := false
+	loginCounter := 0
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		message, err := protocol.Parse(scanner.Bytes())
@@ -45,12 +46,22 @@ func TestTaskClientFakeBackend(t *testing.T) {
 			result, _ := json.Marshal(map[string]any{"account": account})
 			writeTaskFakeMessage(protocol.Success(message.ID, result))
 		case "account/login/start":
-			verificationURL := "https://auth.openai.com/codex/device"
+			loginCounter++
+			var input struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(message.Params, &input) != nil || input.Type != "chatgpt" {
+				writeTaskFakeMessage(protocol.Failure(message.ID, -32602, "browser sign-in required"))
+				continue
+			}
+			verificationURL := "https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"
 			if os.Getenv("CODEX_MUX_TASK_FAKE_UNTRUSTED") == "1" {
 				verificationURL = "https://example.test/device"
 			}
-			result, _ := json.Marshal(map[string]string{"verificationUrl": verificationURL, "userCode": "ABCD-EFGH"})
+			result, _ := json.Marshal(map[string]string{"loginId": fmt.Sprintf("task-fake-login-%d", loginCounter), "authUrl": verificationURL})
 			writeTaskFakeMessage(protocol.Success(message.ID, result))
+		case "account/login/cancel":
+			writeTaskFakeMessage(protocol.Success(message.ID, json.RawMessage(`{}`)))
 		case "account/logout":
 			connected = false
 			writeTaskFakeMessage(protocol.Success(message.ID, json.RawMessage(`{}`)))
@@ -118,7 +129,7 @@ func TestStrictTaskClientAgainstRealControlHandlers(t *testing.T) {
 	}, &started); err != nil {
 		t.Fatal(err)
 	}
-	if started.Login.UserCode != "ABCD-EFGH" || !control.TrustedOpenAIVerificationURL(started.Login.VerificationURL) {
+	if started.Login.UserCode != "" || !control.TrustedOpenAIBrowserLoginURL(started.Login.VerificationURL) {
 		t.Fatalf("unexpected real-handler challenge: %#v", started)
 	}
 	var cancelled attemptResponse
@@ -168,7 +179,7 @@ func TestUntrustedChallengeIsCancelledBeforeRetry(t *testing.T) {
 	err = client.request(ctx, http.MethodPost, "/v1/task-actions/connect-account", map[string]any{
 		"idempotencyKey": "untrusted-connect", "newAccount": false,
 	}, &ignored)
-	if err == nil || !strings.Contains(err.Error(), "trusted verification challenge") {
+	if err == nil || !strings.Contains(err.Error(), "trusted sign-in URL") {
 		t.Fatalf("untrusted challenge was not rejected: %v", err)
 	}
 	oldAttemptID := ""
@@ -189,7 +200,42 @@ func TestUntrustedChallengeIsCancelledBeforeRetry(t *testing.T) {
 	if err != nil || oldStatus.State != mux.LoginCancelled {
 		t.Fatalf("untrusted attempt remained active: %#v %v", oldStatus, err)
 	}
-	retry, err := multiplexer.StartLoginAttempt(ctx, "primary", "chatgptDeviceCode", "untrusted-retry")
+	dashboardRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL+"/v1/accounts/primary/login", strings.NewReader(`{"mode":"chatgpt","idempotencyKey":"dashboard-untrusted"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboardRequest.Header.Set("Content-Type", "application/json")
+	dashboardRequest.Header.Set("X-Codex-Mux-Token", token)
+	dashboardResponse, err := httpServer.Client().Do(dashboardRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dashboardResponse.Body.Close()
+	if dashboardResponse.StatusCode != http.StatusBadGateway {
+		body, _ := io.ReadAll(dashboardResponse.Body)
+		t.Fatalf("dashboard accepted untrusted callback: status=%d body=%s", dashboardResponse.StatusCode, body)
+	}
+	dashboardAttemptID := ""
+	dashboardCancelled := false
+	dashboardDeadline := time.After(3 * time.Second)
+	for !dashboardCancelled {
+		select {
+		case event := <-events:
+			attempt, ok := event.Data.(mux.LoginAttempt)
+			if !ok || attempt.ID == oldAttemptID {
+				continue
+			}
+			dashboardAttemptID = attempt.ID
+			dashboardCancelled = attempt.State == mux.LoginCancelled
+		case <-dashboardDeadline:
+			t.Fatal("dashboard untrusted login was not cancelled")
+		}
+	}
+	dashboardStatus, err := multiplexer.LoginStatus(dashboardAttemptID)
+	if err != nil || dashboardStatus.State != mux.LoginCancelled {
+		t.Fatalf("dashboard untrusted attempt remained active: %#v %v", dashboardStatus, err)
+	}
+	retry, err := multiplexer.StartLoginAttempt(ctx, "primary", "chatgpt", "untrusted-retry")
 	if err != nil || retry.ID == oldAttemptID || retry.State != mux.LoginPending {
 		t.Fatalf("retry reused untrusted attempt: %#v %v", retry, err)
 	}
@@ -277,7 +323,7 @@ func TestConnectCommandsPreserveIntentAndEmitSafeEvents(t *testing.T) {
 					t.Fatalf("newAccount = %v, want %v", input.NewAccount, test.wantNew)
 				}
 				response.Header().Set("Content-Type", "application/json")
-				_, _ = response.Write([]byte(`{"account":{"id":"primary","label":"Primary","enabled":false,"primary":true,"connected":false,"error":"Needs sign-in"},"attempt":{"id":"attempt-1","state":"pending","expiresAt":9999999999},"login":{"userCode":"ABCD-EFGH","verificationUrl":"https://auth.openai.com/codex/device"}}`))
+				_, _ = response.Write([]byte(`{"account":{"id":"primary","label":"Primary","enabled":false,"primary":true,"connected":false,"error":"Needs sign-in"},"attempt":{"id":"attempt-1","state":"pending","expiresAt":9999999999},"login":{"verificationUrl":"https://auth.openai.com/oauth/authorize?response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"}}`))
 			})
 			defer cleanup()
 			if test.openFails {
@@ -287,7 +333,7 @@ func TestConnectCommandsPreserveIntentAndEmitSafeEvents(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := output.String()
-			if !strings.Contains(got, `"event":"verification_required"`) || strings.Contains(got, "private executable path") {
+			if !strings.Contains(got, `"event":"sign_in_required"`) || strings.Contains(got, "private executable path") {
 				t.Fatalf("unsafe or incomplete connect output: %s", got)
 			}
 			if test.openFails && !strings.Contains(got, `"event":"browser_open_failed"`) {

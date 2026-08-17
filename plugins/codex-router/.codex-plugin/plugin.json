@@ -1,6 +1,6 @@
 {
   "name": "codex-router",
-  "version": "0.1.0",
+  "version": "0.1.1+codex.20260818005200",
   "description": "Check Codex Router status and connect OpenAI accounts from Codex.",
   "author": {
     "name": "Flowwweb",

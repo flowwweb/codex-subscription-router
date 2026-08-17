@@ -23,6 +23,45 @@ async function codexMuxRequest(path, options = {}) {
   return body;
 }
 
+function codexMuxRequestKey() {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function codexMuxTrustedBrowserLoginURL(value) {
+  if (!value) return "";
+  try {
+    const destination = new URL(value);
+    const validOuterEncoding = !/%(?![0-9a-f]{2})/i.test(destination.search);
+    const redirects = destination.searchParams.getAll("redirect_uri");
+    const callback = redirects.length === 1 ? new URL(redirects[0]) : null;
+    const loopback = callback &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(callback.hostname);
+    const port = callback ? Number(callback.port) : 0;
+    const trustedCallback = callback && callback.protocol === "http:" &&
+      loopback && Number.isInteger(port) && port > 0 && port <= 65535 &&
+      callback.pathname === "/auth/callback" && !callback.search &&
+      !callback.hash && !callback.username && !callback.password;
+    const trustedDestination = destination.protocol === "https:" &&
+      destination.hostname === "auth.openai.com" && !destination.username &&
+      !destination.password && (!destination.port || destination.port === "443") &&
+      destination.pathname === "/oauth/authorize" && !destination.hash &&
+      validOuterEncoding &&
+      destination.searchParams.getAll("response_type").length === 1 &&
+      destination.searchParams.get("response_type") === "code" &&
+      destination.searchParams.getAll("code_challenge_method").length === 1 &&
+      destination.searchParams.get("code_challenge_method") === "S256" &&
+      destination.searchParams.getAll("state").length === 1 &&
+      Boolean(destination.searchParams.get("state")) &&
+      destination.searchParams.getAll("code_challenge").length === 1 &&
+      Boolean(destination.searchParams.get("code_challenge"));
+    return trustedDestination && trustedCallback ? destination.href : "";
+  } catch {
+    return "";
+  }
+}
+
 const CODEX_MUX_ACCOUNT_SCOPED_PLUGIN_METHODS = new Set([
   "list-apps",
   "list-installed-apps",
@@ -226,15 +265,37 @@ function CodexMuxResetAccountSelector({
   });
 }
 
+async function codexMuxReadLoginTerminal(request, attemptId) {
+  const result = await request(`/login-attempts/${encodeURIComponent(attemptId)}`);
+  return result.attempt?.state && result.attempt.state !== "pending"
+    ? result.attempt
+    : null;
+}
+
 function CodexMuxAccountMenu() {
   const modalScope = Lo(Q);
   const [accounts, setAccounts] = kXc.useState([]);
   const [loading, setLoading] = kXc.useState(true);
   const [busy, setBusy] = kXc.useState(false);
   const [error, setError] = kXc.useState("");
+  const [loginError, setLoginError] = kXc.useState("");
   const [login, setLogin] = kXc.useState(null);
   const [codeCopied, setCodeCopied] = kXc.useState(false);
-  const loginAccountId = login?.accountId || null;
+  const loginAttemptId = login?.attemptId || null;
+
+  function finishLogin(attempt) {
+    codexMuxLoginActive = false;
+    setLogin(null);
+    if (attempt?.state === "succeeded") {
+      setLoginError("");
+    } else if (attempt?.state === "expired") {
+      setLoginError("Sign-in expired. Try connecting again below.");
+    } else if (attempt?.state === "failed") {
+      setLoginError("This account did not connect. Try connecting again below.");
+    } else if (attempt?.state === "cancelled") {
+      setLoginError("Sign-in was cancelled. Try connecting again below.");
+    }
+  }
 
   const refresh = kXc.useCallback(async () => {
     try {
@@ -254,22 +315,6 @@ function CodexMuxAccountMenu() {
 
   kXc.useEffect(() => {
     refresh();
-    const events = new EventSource(
-      `${CODEX_MUX_API}/events?token=${encodeURIComponent(CODEX_MUX_TOKEN)}`,
-    );
-    events.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        if (
-          payload.type === "account-updated" &&
-          payload.accountId === loginAccountId
-        ) {
-          codexMuxLoginActive = false;
-          setLogin(null);
-        }
-        if (payload.type === "account-updated") refresh();
-      } catch {}
-    };
     const warmupTimer = setTimeout(refresh, 2_000);
     const loadingDeadline = setTimeout(() => {
       refresh().finally(() => setLoading(false));
@@ -279,20 +324,33 @@ function CodexMuxAccountMenu() {
       clearTimeout(warmupTimer);
       clearTimeout(loadingDeadline);
       clearInterval(timer);
-      events.close();
     };
-  }, [refresh, loginAccountId]);
+  }, [refresh]);
 
   kXc.useEffect(() => {
-    if (!login) return;
-    const allowEscapeDismissal = (event) => {
-      if (event.key !== "Escape") return;
-      codexMuxLoginActive = false;
-      setLogin(null);
+    if (!loginAttemptId) return undefined;
+    let stopped = false;
+    let timer = null;
+    const poll = async () => {
+      try {
+        const terminal = await codexMuxReadLoginTerminal(codexMuxRequest, loginAttemptId);
+        if (stopped) return;
+        if (terminal) {
+          finishLogin(terminal);
+          await refresh();
+          return;
+        }
+      } catch {
+        if (!stopped) setError("Sign-in status is unavailable. Trying again…");
+      }
+      if (!stopped) timer = setTimeout(poll, 1_500);
     };
-    window.addEventListener("keydown", allowEscapeDismissal, true);
-    return () => window.removeEventListener("keydown", allowEscapeDismissal, true);
-  }, [login]);
+    poll();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [loginAttemptId]);
 
   const connected = accounts.filter(
     (account) => account.connected && account.enabled,
@@ -313,20 +371,27 @@ function CodexMuxAccountMenu() {
     if (busy) return;
     setBusy(true);
     setError("");
+    setLoginError("");
     try {
-      const created = await codexMuxRequest("/accounts", {
+      const reusable = accounts.find(
+        (account) => !account.connected || account.error,
+      );
+      const account = reusable || (await codexMuxRequest("/accounts", {
         method: "POST",
         body: JSON.stringify({ label: `Subscription ${connected.length + 1}` }),
-      });
-      const result = await codexMuxRequest(`/accounts/${created.account.id}/login`, {
+      })).account;
+      const result = await codexMuxRequest(`/accounts/${account.id}/login`, {
         method: "POST",
-        body: JSON.stringify({ mode: "chatgptDeviceCode" }),
+        body: JSON.stringify({
+          mode: "chatgpt",
+          idempotencyKey: codexMuxRequestKey(),
+        }),
       });
       const pendingLogin = result.login
-        ? { ...result.login, accountId: created.account.id }
+        ? { ...result.login, accountId: account.id, attemptId: result.attempt?.id }
         : null;
-      codexMuxLoginActive = pendingLogin != null;
       setCodeCopied(false);
+      codexMuxLoginActive = pendingLogin != null;
       setLogin(pendingLogin);
       await refresh();
     } catch (requestError) {
@@ -345,14 +410,11 @@ function CodexMuxAccountMenu() {
       : Promise.resolve();
     if (verificationUrl) {
       try {
-        const destination = new URL(verificationUrl);
-        const trustedHost =
-          destination.hostname === "chatgpt.com" ||
-          destination.hostname === "auth.openai.com";
-        if (destination.protocol !== "https:" || !trustedHost) {
+        const trustedURL = codexMuxTrustedBrowserLoginURL(verificationUrl);
+        if (!trustedURL) {
           throw new Error("untrusted verification URL");
         }
-        window.open(destination.href, "_blank", "noopener,noreferrer");
+        window.open(trustedURL, "_blank", "noopener,noreferrer");
       } catch {
         setError("The sign-in verification page could not be opened safely.");
       }
@@ -462,14 +524,35 @@ function CodexMuxAccountMenu() {
     );
   }
 
-  if (!loading) {
+  if (loginError) {
+    rows.push(
+      (0, e7.jsx)(
+        _H,
+        {
+          LeftIcon: S2,
+          SubText: loginError,
+          tone: "danger",
+          allowWrap: true,
+          subTextAllowWrap: true,
+          children: "Account not connected",
+        },
+        "codex-mux-login-error",
+      ),
+    );
+  }
+
+  if (!loading && !login) {
     rows.push(
       (0, e7.jsx)(
         _H,
         {
           LeftIcon: CodexMuxPlusIcon,
           onSelect: addSubscription,
-          children: busy ? "Adding subscription…" : "Add another subscription",
+          children: busy
+            ? "Connecting subscription…"
+            : connected.length > 0
+              ? "Add another subscription"
+              : "Connect subscription",
         },
         "codex-mux-add",
       ),
