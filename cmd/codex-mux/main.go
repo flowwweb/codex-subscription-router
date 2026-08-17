@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -33,13 +34,43 @@ const legacyControlPort = 48123
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "codex-mux: %v\n", err)
+		reportCommandError(err, os.Args[1:], os.Stdout, os.Stderr)
 		os.Exit(1)
 	}
 }
 
+func reportCommandError(err error, args []string, stdout, stderr io.Writer) {
+	var reported *reportedError
+	if errors.As(err, &reported) {
+		return
+	}
+	if wantsJSONError(args) {
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"event": "error", "message": safeText(err.Error())})
+		return
+	}
+	_, _ = fmt.Fprintf(stderr, "codex-mux: %v\n", err)
+}
+
+func wantsJSONError(args []string) bool {
+	if len(args) == 0 || (args[0] != "status" && args[0] != "connect-account") {
+		return false
+	}
+	for _, argument := range args[1:] {
+		if argument == "--json" || argument == "--json=true" {
+			return true
+		}
+	}
+	return false
+}
+
 func run() error {
 	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "status" {
+		return runAccountStatus(args[1:])
+	}
+	if len(args) > 0 && args[0] == "connect-account" {
+		return runConnectAccount(args[1:])
+	}
 	if len(args) > 0 && args[0] == "daemon" {
 		return runDaemon(args[1:])
 	}
@@ -279,6 +310,7 @@ func runDaemon(realArgs []string) error {
 		multiplexer,
 		os.Getenv("CODEX_MUX_UI_TESTS") == "1",
 	)
+	controlServer.SetRuntimeIdentity(receipt.Instance)
 	controlServer.SetTechnicalDetails(control.TechnicalDetails{Build: buildID, StateRoot: root, PrimaryCodexHome: primaryCodexHome})
 	errorsChannel := make(chan error, 2)
 	go func() {
@@ -424,6 +456,22 @@ func loadOrCreateToken(root string) (string, error) {
 	}
 	if err := state.SecureFile(path); err != nil {
 		return "", fmt.Errorf("secure control token ACL: %w", err)
+	}
+	return token, nil
+}
+
+func loadExistingToken(root string) (string, error) {
+	path := filepath.Join(root, "control-token")
+	if err := state.SecureFile(path); err != nil {
+		return "", fmt.Errorf("secure control token ACL: %w", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read installed control token: %w", err)
+	}
+	token, err := validateControlToken(string(data))
+	if err != nil {
+		return "", fmt.Errorf("read installed control token: %w", err)
 	}
 	return token, nil
 }

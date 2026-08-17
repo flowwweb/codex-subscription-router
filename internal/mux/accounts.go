@@ -228,18 +228,28 @@ func (m *Multiplexer) StartLoginAttempt(ctx context.Context, id, mode, key strin
 		m.loginMu.Unlock()
 		return m.waitForLoginStart(ctx, attemptID, ready)
 	}
+	if attemptID := m.pendingLoginForAccountLocked(id); attemptID != "" {
+		m.loginKeys[key] = attemptID
+		ready := m.loginReady[attemptID]
+		m.loginMu.Unlock()
+		return m.waitForLoginStart(ctx, attemptID, ready)
+	}
 	m.loginMu.Unlock()
 	account, ok := m.store.Account(id)
 	if !ok {
 		return LoginAttempt{}, fmt.Errorf("account %q not found", id)
 	}
-	if !account.Enabled {
-		return LoginAttempt{}, fmt.Errorf("account %q is disabled", id)
-	}
 	child, ok := m.child(id)
 	if !ok {
 		var err error
-		child, err = m.startChild(ctx, account)
+		if account.Enabled {
+			child, err = m.startChild(ctx, account)
+		} else {
+			// Authentication is a repair action, not a routing action. A disabled
+			// account may temporarily start its backend to sign in without becoming
+			// eligible for routing.
+			child, err = m.startChildInternal(ctx, account, false)
+		}
 		if err != nil {
 			return LoginAttempt{}, fmt.Errorf("account %q is unavailable: %w", id, err)
 		}
@@ -255,6 +265,12 @@ func (m *Multiplexer) StartLoginAttempt(ctx context.Context, id, mode, key strin
 	}
 	m.loginMu.Lock()
 	if existingID := m.loginKeys[key]; existingID != "" {
+		ready := m.loginReady[existingID]
+		m.loginMu.Unlock()
+		return m.waitForLoginStart(ctx, existingID, ready)
+	}
+	if existingID := m.pendingLoginForAccountLocked(id); existingID != "" {
+		m.loginKeys[key] = existingID
 		ready := m.loginReady[existingID]
 		m.loginMu.Unlock()
 		return m.waitForLoginStart(ctx, existingID, ready)
@@ -276,6 +292,7 @@ func (m *Multiplexer) StartLoginAttempt(ctx context.Context, id, mode, key strin
 		delete(m.loginReady, attempt.ID)
 		m.loginMu.Unlock()
 		m.publish(Event{Type: "account-login", AccountID: id, Data: attempt})
+		m.stopDisabledLoginChild(id)
 		return attempt, err
 	}
 	m.loginMu.Lock()
@@ -287,23 +304,59 @@ func (m *Multiplexer) StartLoginAttempt(ctx context.Context, id, mode, key strin
 	delete(m.loginReady, attempt.ID)
 	m.loginMu.Unlock()
 	m.publish(Event{Type: "account-login", AccountID: id, Data: attempt})
+	if !account.Enabled {
+		m.scheduleDisabledLoginExpiry(attempt.ID, attempt.ExpiresAt)
+	}
 	return attempt, nil
+}
+
+func (m *Multiplexer) pendingLoginForAccountLocked(accountID string) string {
+	now := m.now().Unix()
+	for id, attempt := range m.loginAttempts {
+		if attempt.AccountID == accountID && attempt.State == LoginPending && now < attempt.ExpiresAt {
+			return id
+		}
+	}
+	return ""
+}
+
+func (m *Multiplexer) scheduleDisabledLoginExpiry(attemptID string, expiresAt int64) {
+	delay := time.Until(time.Unix(expiresAt, 0))
+	if delay < 0 {
+		delay = 0
+	}
+	go func() {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			_, _ = m.LoginStatus(attemptID)
+		case <-m.runCtx.Done():
+		}
+	}()
 }
 
 func (m *Multiplexer) LoginStatus(attemptID string) (LoginAttempt, error) {
 	m.loginMu.Lock()
-	defer m.loginMu.Unlock()
 	attempt, ok := m.loginAttempts[attemptID]
 	if !ok {
+		m.loginMu.Unlock()
 		return LoginAttempt{}, fmt.Errorf("login attempt %q not found", attemptID)
 	}
+	expired := false
 	if attempt.State == LoginPending && m.now().Unix() >= attempt.ExpiresAt {
 		attempt.State = LoginExpired
 		attempt.Error = "login expired before the subscription connected"
 		attempt.UpdatedAt = m.now().Unix()
 		m.loginAttempts[attemptID] = attempt
+		expired = true
 	}
-	return cloneLoginAttempt(attempt), nil
+	result := cloneLoginAttempt(attempt)
+	m.loginMu.Unlock()
+	if expired {
+		m.stopDisabledLoginChild(attempt.AccountID)
+	}
+	return result, nil
 }
 
 func (m *Multiplexer) CancelLogin(ctx context.Context, attemptID string) (LoginAttempt, error) {
@@ -333,6 +386,7 @@ func (m *Multiplexer) CancelLogin(ctx context.Context, attemptID string) (LoginA
 	m.loginAttempts[attemptID] = attempt
 	m.loginMu.Unlock()
 	m.publish(Event{Type: "account-login", AccountID: attempt.AccountID, Data: attempt})
+	m.stopDisabledLoginChild(attempt.AccountID)
 	return cloneLoginAttempt(attempt), nil
 }
 
@@ -363,6 +417,9 @@ func (m *Multiplexer) Logout(ctx context.Context, id string) error {
 		return fmt.Errorf("account %q is unavailable", id)
 	}
 	_, err := child.Request(ctx, "account/logout", nil)
+	if err == nil {
+		err = m.store.SetAccountConnected(id, false)
+	}
 	return err
 }
 
@@ -379,7 +436,7 @@ func (m *Multiplexer) accountSnapshotWithProfile(ctx context.Context, accountID 
 	if !ok {
 		if !account.Enabled {
 			return AccountSnapshot{
-				ID: account.ID, Label: account.Label, Enabled: false,
+				ID: account.ID, Label: account.Label, Enabled: false, Connected: account.LastKnownConnected,
 				Controller: account.Controller, CreatedAt: account.CreatedAt,
 				ThreadCount: m.store.ThreadCounts()[account.ID],
 			}, nil
@@ -402,6 +459,9 @@ func (m *Multiplexer) accountSnapshotWithProfile(ctx context.Context, accountID 
 		Controller: account.Controller, Connected: string(accountResult.Account) != "null" && len(accountResult.Account) > 0,
 		CreatedAt: account.CreatedAt, RawAccount: accountResult.Account,
 		ThreadCount: m.store.ThreadCounts()[account.ID],
+	}
+	if err := m.store.SetAccountConnected(account.ID, snapshot.Connected); err != nil {
+		return AccountSnapshot{}, err
 	}
 	if snapshot.Connected {
 		var details struct {
@@ -435,7 +495,6 @@ func (m *Multiplexer) accountSnapshotWithProfile(ctx context.Context, accountID 
 
 func (m *Multiplexer) completeLoginAttempts(accountID string) {
 	m.loginMu.Lock()
-	defer m.loginMu.Unlock()
 	for id, attempt := range m.loginAttempts {
 		if attempt.AccountID != accountID || attempt.State != LoginPending {
 			continue
@@ -444,6 +503,15 @@ func (m *Multiplexer) completeLoginAttempts(accountID string) {
 		attempt.Error = ""
 		attempt.UpdatedAt = m.now().Unix()
 		m.loginAttempts[id] = attempt
+	}
+	m.loginMu.Unlock()
+	m.stopDisabledLoginChild(accountID)
+}
+
+func (m *Multiplexer) stopDisabledLoginChild(accountID string) {
+	account, ok := m.store.Account(accountID)
+	if ok && !account.Enabled {
+		_ = m.stopChild(accountID)
 	}
 }
 

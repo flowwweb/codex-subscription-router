@@ -20,12 +20,13 @@ const stateVersion = 1
 const maxAccountCreateKeyLength = 128
 
 type Account struct {
-	ID         string `json:"id"`
-	Label      string `json:"label"`
-	CodexHome  string `json:"codexHome"`
-	Enabled    bool   `json:"enabled"`
-	Controller bool   `json:"controller"`
-	CreatedAt  int64  `json:"createdAt"`
+	ID                 string `json:"id"`
+	Label              string `json:"label"`
+	CodexHome          string `json:"codexHome"`
+	Enabled            bool   `json:"enabled"`
+	Controller         bool   `json:"controller"`
+	LastKnownConnected bool   `json:"lastKnownConnected,omitempty"`
+	CreatedAt          int64  `json:"createdAt"`
 }
 
 type persistedState struct {
@@ -335,6 +336,22 @@ func (s *Store) UpdateAccount(id string, label *string, enabled *bool) (Account,
 		return s.accounts[index], nil
 	}
 	return Account{}, fmt.Errorf("account %q not found", id)
+}
+
+func (s *Store) SetAccountConnected(id string, connected bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.accounts {
+		if s.accounts[index].ID != id {
+			continue
+		}
+		if s.accounts[index].LastKnownConnected == connected {
+			return nil
+		}
+		s.accounts[index].LastKnownConnected = connected
+		return s.saveLocked()
+	}
+	return fmt.Errorf("account %q not found", id)
 }
 
 func (s *Store) ThreadOwner(threadID string) (string, bool) {

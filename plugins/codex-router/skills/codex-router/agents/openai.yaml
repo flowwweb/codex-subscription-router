@@ -1,0 +1,8 @@
+interface:
+  display_name: "Codex Router"
+  short_description: "Check routing or connect an OpenAI account"
+  default_prompt: "Use $codex-router to show my router status."
+  icon_small: "./assets/flowwweb-icon.png"
+  icon_large: "./assets/flowwweb-icon.png"
+policy:
+  allow_implicit_invocation: true

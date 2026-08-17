@@ -1,0 +1,36 @@
+{
+  "name": "codex-router",
+  "version": "0.1.0",
+  "description": "Check Codex Router status and connect OpenAI accounts from Codex.",
+  "author": {
+    "name": "Flowwweb",
+    "url": "https://github.com/flowwweb/codex-subscription-router"
+  },
+  "homepage": "https://github.com/flowwweb/codex-subscription-router",
+  "repository": "https://github.com/flowwweb/codex-subscription-router",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "openai",
+    "router"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Router",
+    "shortDescription": "Check routing or connect an OpenAI account.",
+    "longDescription": "See whether Codex Router is ready, review connected account availability, or securely connect another OpenAI account.",
+    "developerName": "Flowwweb",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Show my router status.",
+      "Connect an OpenAI account.",
+      "Connect another OpenAI account."
+    ],
+    "composerIcon": "./assets/flowwweb-icon.png",
+    "logo": "./assets/flowwweb-icon.png",
+    "logoDark": "./assets/flowwweb-icon.png"
+  }
+}

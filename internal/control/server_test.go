@@ -40,6 +40,72 @@ func TestPresentLoginOnlyReturnsUserCredentialAndTrustedOpenAIURL(t *testing.T) 
 	}
 }
 
+func TestTrustedOpenAIVerificationURLRejectsLookalikesAndUnsafePorts(t *testing.T) {
+	for _, trusted := range []string{
+		"https://chatgpt.com/device", "https://auth.openai.com/codex/device", "https://login.auth.openai.com:443/device",
+	} {
+		if !TrustedOpenAIVerificationURL(trusted) {
+			t.Fatalf("trusted verification URL rejected: %s", trusted)
+		}
+	}
+	for _, untrusted := range []string{
+		"http://auth.openai.com/device", "https://auth.openai.com.evil.test/device", "https://user@chatgpt.com/device",
+		"https://chatgpt.com:444/device", "https://chatgpt.com/device\nmalicious", strings.Repeat("x", 2049),
+	} {
+		if TrustedOpenAIVerificationURL(untrusted) {
+			t.Fatalf("unsafe verification URL accepted: %q", untrusted)
+		}
+	}
+}
+
+func TestTaskActionsRequireExactTokenAndRuntimeInstance(t *testing.T) {
+	token := strings.Repeat("a", 64)
+	server := New(testHost, token, nil, false)
+	server.SetRuntimeIdentity("runtime-1")
+	for name, test := range map[string]struct {
+		token, instance string
+		want            bool
+	}{
+		"exact":           {token, "runtime-1", true},
+		"missing token":   {"", "runtime-1", false},
+		"wrong token":     {strings.Repeat("b", 64), "runtime-1", false},
+		"missing runtime": {token, "", false},
+		"wrong runtime":   {token, "runtime-2", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/v1/task-actions/status", nil)
+			request.Header.Set("X-Codex-Mux-Token", test.token)
+			request.Header.Set("X-Codex-Mux-Instance", test.instance)
+			if got := server.taskAuthorized(request); got != test.want {
+				t.Fatalf("taskAuthorized() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestTaskPresentationsDoNotExposeBackendErrors(t *testing.T) {
+	secret := "device_code=private-secret\nC:\\Users\\person\\.codex"
+	accountJSON, err := json.Marshal(taskAccountFromSnapshot(mux.AccountSnapshot{
+		ID: "account-1", Label: "Primary", Error: secret,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attemptJSON, err := json.Marshal(presentTaskLoginAttempt(mux.LoginAttempt{
+		ID: "attempt-1", State: mux.LoginFailed, Error: secret,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	combined := string(accountJSON) + string(attemptJSON)
+	if strings.Contains(combined, "private-secret") || strings.Contains(combined, `C:\Users`) || strings.Contains(combined, "device_code") {
+		t.Fatalf("task presentation exposed backend details: %s", combined)
+	}
+	if len(combined) > 512 {
+		t.Fatalf("task presentation is unexpectedly large: %d", len(combined))
+	}
+}
+
 const testHost = "127.0.0.1:48123"
 
 func request(server *Server, method, target, body string) *httptest.ResponseRecorder {

@@ -9,6 +9,15 @@ $ErrorActionPreference = "Stop"
 $configPath = Join-Path $InstallRoot "router-config.json"
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw "Installed router configuration is missing." }
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+$expectedConnectScript = Join-Path $InstallRoot "Connect Codex Router Account.ps1"
+if ([string]$config.connectScript -ne $expectedConnectScript -or -not (Test-Path -LiteralPath $expectedConnectScript -PathType Leaf)) {
+    throw "Installed account launcher does not match configuration."
+}
+$versionConnectScript = Join-Path (Split-Path -Parent ([string]$config.muxExecutable)) "connect-account.ps1"
+if (-not (Test-Path -LiteralPath $versionConnectScript -PathType Leaf) -or
+    (Get-FileHash -LiteralPath $versionConnectScript -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $expectedConnectScript -Algorithm SHA256).Hash) {
+    throw "Installed account launcher does not match the accepted version."
+}
 $receiptPath = Join-Path $config.stateRoot "runtime.json"
 
 function Get-Receipt { Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json }

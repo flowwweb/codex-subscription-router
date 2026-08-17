@@ -340,6 +340,10 @@ func (m *Multiplexer) routeExistingRequest(message protocol.Message) {
 		m.write(protocol.Failure(message.ID, -32022, "no controller account is configured"))
 		return
 	}
+	if account, ok := m.store.Account(accountID); !ok || !account.Enabled {
+		m.write(protocol.Failure(message.ID, -32022, "the assigned subscription is paused"))
+		return
+	}
 	if message.Method == "turn/start" && threadID != "" {
 		go m.routeTurnStart(message, threadID, accountID)
 		return
@@ -646,6 +650,9 @@ func (m *Multiplexer) childEntries() []childEntry {
 	defer m.childrenMu.RUnlock()
 	entries := make([]childEntry, 0, len(accounts))
 	for _, account := range accounts {
+		if !account.Enabled {
+			continue
+		}
 		if child := m.children[account.ID]; child != nil {
 			entries = append(entries, childEntry{account: account, child: child})
 		}
@@ -662,7 +669,7 @@ func (m *Multiplexer) child(accountID string) (*backend.Child, bool) {
 
 func (m *Multiplexer) controllerChild() (*backend.Child, bool) {
 	controller, ok := m.store.Controller()
-	if !ok {
+	if !ok || !controller.Enabled {
 		return nil, false
 	}
 	return m.child(controller.ID)

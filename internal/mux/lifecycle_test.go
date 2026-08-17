@@ -258,6 +258,129 @@ func TestLoginAttemptsAreIdempotentAndTerminal(t *testing.T) {
 	}
 }
 
+func TestConcurrentLoginStartReusesOneAttempt(t *testing.T) {
+	multiplexer, _, _ := newLifecycleMux(t, false)
+	if err := multiplexer.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer multiplexer.Close()
+	results := make(chan LoginAttempt, 2)
+	errors := make(chan error, 2)
+	for index := range 2 {
+		key := fmt.Sprintf("concurrent-login-%d", index)
+		go func() {
+			attempt, err := multiplexer.StartLoginAttempt(context.Background(), "primary", "chatgptDeviceCode", key)
+			results <- attempt
+			errors <- err
+		}()
+	}
+	first, second := <-results, <-results
+	if err := <-errors; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errors; err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == "" || first.ID != second.ID {
+		t.Fatalf("concurrent login created duplicate attempts: %#v %#v", first, second)
+	}
+}
+
+func TestDisabledAccountCanSignInWithoutResumingRouting(t *testing.T) {
+	multiplexer, store, _ := newLifecycleMux(t, false)
+	if err := multiplexer.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer multiplexer.Close()
+	disabled := false
+	if _, err := multiplexer.UpdateAccount(context.Background(), "primary", nil, &disabled); err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := multiplexer.StartLoginAttempt(context.Background(), "primary", "chatgptDeviceCode", "disabled-login")
+	if err != nil || attempt.State != LoginPending || !multiplexer.hasChild("primary") {
+		t.Fatalf("disabled login start = %#v, %v, child=%v", attempt, err, multiplexer.hasChild("primary"))
+	}
+	cancelled, err := multiplexer.CancelLogin(context.Background(), attempt.ID)
+	if err != nil || cancelled.State != LoginCancelled {
+		t.Fatalf("disabled login cancel = %#v, %v", cancelled, err)
+	}
+	account, ok := store.Account("primary")
+	if !ok || account.Enabled || multiplexer.hasChild("primary") {
+		t.Fatalf("login repair resumed disabled routing: account=%#v child=%v", account, multiplexer.hasChild("primary"))
+	}
+}
+
+func TestAbandonedDisabledLoginExpiresAndStopsTemporaryChild(t *testing.T) {
+	multiplexer, store, _ := newLifecycleMux(t, false)
+	if err := multiplexer.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer multiplexer.Close()
+	disabled := false
+	if _, err := multiplexer.UpdateAccount(context.Background(), "primary", nil, &disabled); err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := multiplexer.StartLoginAttempt(context.Background(), "primary", "chatgptDeviceCode", "abandoned-login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	multiplexer.loginMu.Lock()
+	short := multiplexer.loginAttempts[attempt.ID]
+	short.ExpiresAt = time.Now().Add(75 * time.Millisecond).Unix()
+	multiplexer.loginAttempts[attempt.ID] = short
+	multiplexer.loginMu.Unlock()
+	multiplexer.scheduleDisabledLoginExpiry(attempt.ID, short.ExpiresAt)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !multiplexer.hasChild("primary") {
+			status, statusErr := multiplexer.LoginStatus(attempt.ID)
+			if statusErr != nil || status.State != LoginExpired {
+				t.Fatalf("autonomous cleanup left wrong terminal state: %#v %v", status, statusErr)
+			}
+			account, ok := store.Account("primary")
+			if !ok || account.Enabled {
+				t.Fatalf("expiry resumed routing: %#v", account)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("abandoned disabled login was not cleaned up: child=%v", multiplexer.hasChild("primary"))
+}
+
+func TestDisabledLoginCompletionStopsChildAndKeepsRoutingPaused(t *testing.T) {
+	multiplexer, store, _ := newLifecycleMux(t, true)
+	if err := multiplexer.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer multiplexer.Close()
+	disabled := false
+	if _, err := multiplexer.UpdateAccount(context.Background(), "primary", nil, &disabled); err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := multiplexer.StartLoginAttempt(context.Background(), "primary", "chatgptDeviceCode", "disabled-complete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		status, statusErr := multiplexer.LoginStatus(attempt.ID)
+		if statusErr == nil && status.State == LoginSucceeded && !multiplexer.hasChild("primary") {
+			account, ok := store.Account("primary")
+			if !ok || account.Enabled || !account.LastKnownConnected {
+				t.Fatalf("completion resumed routing: %#v", account)
+			}
+			snapshots := multiplexer.Accounts(context.Background())
+			if len(snapshots) != 1 || !snapshots[0].Connected || snapshots[0].Enabled {
+				t.Fatalf("paused connected status is not truthful: %#v", snapshots)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("completed disabled login was not cleaned up: child=%v", multiplexer.hasChild("primary"))
+}
+
 func TestLoginCompletesOnlyAfterConnectedAccountRead(t *testing.T) {
 	multiplexer, _, _ := newLifecycleMux(t, true)
 	if err := multiplexer.Start(context.Background()); err != nil {

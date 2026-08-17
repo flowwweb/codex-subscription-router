@@ -249,6 +249,8 @@ $muxExecutable = Join-Path $versionRoot "codex-mux.exe"
 $startScript = Join-Path $versionRoot "start-router.ps1"
 $launchScript = Join-Path $versionRoot "launch-router.ps1"
 $dashboardScript = Join-Path $versionRoot "open-dashboard.ps1"
+$versionConnectScript = Join-Path $versionRoot "connect-account.ps1"
+$connectScript = Join-Path $installRoot "Connect Codex Router Account.ps1"
 
 New-Item -ItemType Directory -Force -Path $installRoot,$stateRoot,$primaryCodexHome,$versionsRoot,$stagingRoot | Out-Null
 
@@ -267,6 +269,7 @@ $muxHash = (Get-FileHash -LiteralPath $muxExecutable -Algorithm SHA256).Hash
 Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\start-router.ps1") -Destination $startScript
 Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\launch-router.ps1") -Destination $launchScript
 Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\open-dashboard.ps1") -Destination $dashboardScript
+Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\connect-account.ps1") -Destination $versionConnectScript
 
 $config = [ordered]@{
     schemaVersion = 2
@@ -279,6 +282,7 @@ $config = [ordered]@{
     startScript = $startScript
     launchScript = $launchScript
     dashboardScript = $dashboardScript
+    connectScript = $connectScript
     stateRoot = $stateRoot
     primaryCodexHome = $primaryCodexHome
     officialVersion = (Get-Item -LiteralPath $official).VersionInfo.ProductVersion
@@ -340,6 +344,8 @@ $stateReceipt = [ordered]@{
     existingUserCodexPath = Join-Path $env:USERPROFILE ".codex"
     launcher = Join-Path $installRoot "Codex Subscription Router.cmd"
     dashboardLauncher = Join-Path $installRoot "Open Subscription Router.cmd"
+    connectScript = $connectScript
+    connectLauncher = $connectScript
 }
 Write-Output (ConvertTo-Json -Depth 3 $stateReceipt)
 
@@ -381,6 +387,7 @@ if (-not $NoLaunch) {
         @{ Source = "scripts\windows\start-router.ps1"; Destination = "start-router.ps1" },
         @{ Source = "scripts\windows\open-dashboard.ps1"; Destination = "open-dashboard.ps1" },
         @{ Source = "scripts\windows\open-dashboard.cmd"; Destination = "Open Subscription Router.cmd" }
+        @{ Source = "scripts\windows\connect-account.ps1"; Destination = "Connect Codex Router Account.ps1" }
     )) {
         $destination = Join-Path $installRoot $script.Destination
         $temporary = $destination + ".new"
@@ -442,6 +449,7 @@ if ($NoLaunch) {
         @{ Source = "scripts\windows\start-router.ps1"; Destination = "start-router.ps1" },
         @{ Source = "scripts\windows\open-dashboard.ps1"; Destination = "open-dashboard.ps1" },
         @{ Source = "scripts\windows\open-dashboard.cmd"; Destination = "Open Subscription Router.cmd" }
+        @{ Source = "scripts\windows\connect-account.ps1"; Destination = "Connect Codex Router Account.ps1" }
     )) {
         Copy-Item -LiteralPath (Join-Path $sourceRoot $script.Source) -Destination (Join-Path $installRoot $script.Destination) -Force
     }

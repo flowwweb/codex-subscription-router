@@ -36,6 +36,32 @@ type loginPresentation struct {
 	VerificationURL string `json:"verificationUrl,omitempty"`
 }
 
+type taskAccount struct {
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	Enabled    bool   `json:"enabled"`
+	Controller bool   `json:"primary"`
+	Connected  bool   `json:"connected"`
+	Email      string `json:"email,omitempty"`
+	PlanLabel  string `json:"plan,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+type taskLoginAttempt struct {
+	ID        string         `json:"id"`
+	State     mux.LoginState `json:"state"`
+	Error     string         `json:"error,omitempty"`
+	ExpiresAt int64          `json:"expiresAt"`
+}
+
+func presentTaskLoginAttempt(attempt mux.LoginAttempt) taskLoginAttempt {
+	presented := taskLoginAttempt{ID: attempt.ID, State: attempt.State, ExpiresAt: attempt.ExpiresAt}
+	if attempt.Error != "" {
+		presented.Error = "OpenAI account connection failed"
+	}
+	return presented
+}
+
 func presentLoginAttempt(attempt mux.LoginAttempt) publicLoginAttempt {
 	return publicLoginAttempt{
 		ID: attempt.ID, AccountID: attempt.AccountID, Mode: attempt.Mode, State: attempt.State,
@@ -84,8 +110,11 @@ func presentLogin(result json.RawMessage) loginPresentation {
 		provider.VerificationURI, provider.VerificationURISnake,
 		provider.AuthURL, provider.AuthURLSnake,
 	)
-	if !trustedOpenAIVerificationURL(verificationURL) {
+	if !TrustedOpenAIVerificationURL(verificationURL) {
 		verificationURL = ""
+	}
+	if len(code) > 64 || strings.IndexFunc(code, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		code = ""
 	}
 	return loginPresentation{UserCode: code, VerificationURL: verificationURL}
 }
@@ -99,9 +128,15 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func trustedOpenAIVerificationURL(value string) bool {
+func TrustedOpenAIVerificationURL(value string) bool {
+	if len(value) == 0 || len(value) > 2048 || strings.IndexFunc(value, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return false
+	}
 	destination, err := url.ParseRequestURI(value)
 	if err != nil || destination.Scheme != "https" || destination.User != nil {
+		return false
+	}
+	if destination.Port() != "" && destination.Port() != "443" {
 		return false
 	}
 	hostname := strings.ToLower(destination.Hostname())
@@ -142,6 +177,8 @@ type Server struct {
 	sessionTTL   time.Duration
 	now          func() time.Time
 	technical    TechnicalDetails
+	instance     string
+	connectMu    sync.Mutex
 }
 
 func New(address, token string, multiplexer *mux.Multiplexer, uiTests bool) *Server {
@@ -177,6 +214,9 @@ func NewWithOptions(address, token string, multiplexer *mux.Multiplexer, uiTests
 	router.HandleFunc("/v1/thread-account", server.threadAccount)
 	router.HandleFunc("/v1/profile/combined", server.combinedProfile)
 	router.HandleFunc("/v1/events", server.events)
+	router.HandleFunc("/v1/task-actions/status", server.taskStatus)
+	router.HandleFunc("/v1/task-actions/connect-account", server.taskConnectAccount)
+	router.HandleFunc("/v1/task-actions/login-attempts/", server.taskLoginAttempt)
 	if uiTests {
 		router.HandleFunc("/v1/test/rate-limits", server.rateLimitPreview)
 		router.HandleFunc("/v1/test/rate-limit-resets", server.resetCreditsPreview)
@@ -189,6 +229,12 @@ func NewWithOptions(address, token string, multiplexer *mux.Multiplexer, uiTests
 		MaxHeaderBytes:    16 * 1024,
 	}
 	return server
+}
+
+func (s *Server) SetRuntimeIdentity(instance string) {
+	s.mu.Lock()
+	s.instance = instance
+	s.mu.Unlock()
 }
 
 // RegisterRuntime allows a daemon to publish the exact loopback listener it owns.
@@ -384,6 +430,166 @@ func (s *Server) accounts(response http.ResponseWriter, request *http.Request) {
 	default:
 		methodNotAllowed(response)
 	}
+}
+
+func taskAccountFromSnapshot(account mux.AccountSnapshot) taskAccount {
+	publicError := ""
+	if account.Error != "" {
+		publicError = "Account unavailable"
+	} else if !account.Connected {
+		publicError = "Needs sign-in"
+	}
+	return taskAccount{
+		ID: account.ID, Label: account.Label, Enabled: account.Enabled, Controller: account.Controller,
+		Connected: account.Connected, Email: account.Email, PlanLabel: account.PlanLabel, Error: publicError,
+	}
+}
+
+func (s *Server) taskStatus(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		methodNotAllowed(response)
+		return
+	}
+	if !s.taskAuthorized(request) {
+		writeJSON(response, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
+	defer cancel()
+	snapshots := s.mux.Accounts(ctx)
+	accounts := make([]taskAccount, 0, len(snapshots))
+	connected := 0
+	for _, account := range snapshots {
+		accounts = append(accounts, taskAccountFromSnapshot(account))
+		if account.Enabled && account.Connected {
+			connected++
+		}
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"routing":  map[string]any{"active": connected > 0, "connectedAccounts": connected},
+		"accounts": accounts,
+	})
+}
+
+func (s *Server) taskConnectAccount(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		methodNotAllowed(response)
+		return
+	}
+	if !s.taskAuthorized(request) {
+		writeJSON(response, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	var input struct {
+		AccountID      string `json:"accountId"`
+		NewAccount     bool   `json:"newAccount"`
+		IdempotencyKey string `json:"idempotencyKey"`
+	}
+	if err := decodeJSON(request, &input); err != nil {
+		writeJSON(response, http.StatusBadRequest, map[string]any{"error": "Invalid connection request"})
+		return
+	}
+	if input.IdempotencyKey == "" || (input.AccountID != "" && input.NewAccount) {
+		writeJSON(response, http.StatusBadRequest, map[string]any{"error": "choose an account or request a new account"})
+		return
+	}
+
+	s.connectMu.Lock()
+	defer s.connectMu.Unlock()
+	ctx, cancel := context.WithTimeout(request.Context(), 30*time.Second)
+	defer cancel()
+	snapshots := s.mux.Accounts(ctx)
+	var selected mux.AccountSnapshot
+	if input.AccountID != "" {
+		for _, account := range snapshots {
+			if account.ID == input.AccountID {
+				selected = account
+				break
+			}
+		}
+		if selected.ID == "" {
+			writeJSON(response, http.StatusNotFound, map[string]any{"error": "account not found"})
+			return
+		}
+	} else if input.NewAccount {
+		var err error
+		selected, err = s.mux.AddAccountIdempotent(ctx, "", "account-"+input.IdempotencyKey)
+		if err != nil {
+			writeJSON(response, http.StatusBadGateway, map[string]any{"error": "Could not prepare a router account"})
+			return
+		}
+	} else {
+		candidates := make([]mux.AccountSnapshot, 0)
+		for _, account := range snapshots {
+			if !account.Connected || account.Error != "" {
+				candidates = append(candidates, account)
+			}
+		}
+		switch len(candidates) {
+		case 0:
+			var err error
+			selected, err = s.mux.AddAccountIdempotent(ctx, "", "account-"+input.IdempotencyKey)
+			if err != nil {
+				writeJSON(response, http.StatusBadGateway, map[string]any{"error": "Could not prepare a router account"})
+				return
+			}
+		case 1:
+			selected = candidates[0]
+		default:
+			labels := make([]string, 0, len(candidates))
+			for _, candidate := range candidates {
+				labels = append(labels, candidate.Label)
+			}
+			writeJSON(response, http.StatusConflict, map[string]any{"error": "choose an account", "accounts": labels})
+			return
+		}
+	}
+	attempt, err := s.mux.StartLoginAttempt(ctx, selected.ID, "chatgptDeviceCode", "login-"+input.IdempotencyKey)
+	if err != nil {
+		writeJSON(response, http.StatusBadGateway, map[string]any{"error": "OpenAI did not start account verification"})
+		return
+	}
+	login := presentLogin(attempt.Result)
+	if login.UserCode == "" || login.VerificationURL == "" {
+		cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, _ = s.mux.CancelLogin(cancelCtx, attempt.ID)
+		cancel()
+		writeJSON(response, http.StatusBadGateway, map[string]any{"error": "OpenAI did not return a trusted verification challenge"})
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"account": taskAccountFromSnapshot(selected), "attempt": presentTaskLoginAttempt(attempt), "login": login,
+	})
+}
+
+func (s *Server) taskLoginAttempt(response http.ResponseWriter, request *http.Request) {
+	if !s.taskAuthorized(request) {
+		writeJSON(response, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	remainder := strings.TrimPrefix(request.URL.Path, "/v1/task-actions/login-attempts/")
+	parts := strings.Split(strings.Trim(remainder, "/"), "/")
+	if len(parts) == 1 && parts[0] != "" && request.Method == http.MethodGet {
+		attempt, err := s.mux.LoginStatus(parts[0])
+		if err != nil {
+			writeJSON(response, http.StatusNotFound, map[string]any{"error": "Connection attempt not found"})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"attempt": presentTaskLoginAttempt(attempt)})
+		return
+	}
+	if len(parts) == 2 && parts[0] != "" && parts[1] == "cancel" && request.Method == http.MethodPost {
+		ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
+		defer cancel()
+		attempt, err := s.mux.CancelLogin(ctx, parts[0])
+		if err != nil {
+			writeJSON(response, http.StatusBadGateway, map[string]any{"error": "Connection cancellation could not be confirmed"})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"attempt": presentTaskLoginAttempt(attempt)})
+		return
+	}
+	methodNotAllowed(response)
 }
 
 func (s *Server) accountAction(response http.ResponseWriter, request *http.Request) {
@@ -586,6 +792,19 @@ func (s *Server) authorized(request *http.Request) bool {
 	return ok
 }
 
+func (s *Server) taskAuthorized(request *http.Request) bool {
+	provided := request.Header.Get("X-Codex-Mux-Token")
+	if len(provided) != len(s.token) || subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) != 1 {
+		return false
+	}
+	s.mu.RLock()
+	instance := s.instance
+	s.mu.RUnlock()
+	providedInstance := request.Header.Get("X-Codex-Mux-Instance")
+	return instance != "" && len(providedInstance) == len(instance) &&
+		subtle.ConstantTimeCompare([]byte(providedInstance), []byte(instance)) == 1
+}
+
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' https:; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
@@ -606,7 +825,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		if origin == "app://-" {
 			response.Header().Set("Access-Control-Allow-Origin", "app://-")
 			response.Header().Set("Vary", "Origin")
-			response.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Codex-Mux-Token")
+			response.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Codex-Mux-Token, X-Codex-Mux-Instance")
 			response.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 		}
 		if request.Method == http.MethodOptions {
