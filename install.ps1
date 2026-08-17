@@ -192,7 +192,11 @@ Assert-NoPathCollision "source checkout" $normalizedSourceRoot "router install" 
 $official = Get-AbsolutePath (Resolve-OfficialExecutable -ExplicitPath $OfficialExecutable)
 $officialRoot = Split-Path -Parent $official
 $officialPackage = Get-AppxPackage -Name "OpenAI.Codex" -ErrorAction SilentlyContinue |
-    Where-Object { (Get-NormalizedPath $_.InstallLocation) -eq (Get-NormalizedPath $officialRoot) } |
+    Where-Object {
+        $packageExecutable = Join-Path $_.InstallLocation "app\ChatGPT.exe"
+        (Test-Path -LiteralPath $packageExecutable -PathType Leaf) -and
+            (Get-NormalizedPath $packageExecutable) -eq (Get-NormalizedPath $official)
+    } |
     Select-Object -First 1
 $officialPackageVersion = if ($officialPackage) { [string]$officialPackage.Version } else { "unpackaged" }
 $officialCodex = Join-Path $officialRoot "resources\codex.exe"
