@@ -9,7 +9,7 @@ stops instead of applying a partial patch.
 | Component | Tested value |
 | --- | --- |
 | Windows platform | Windows x64 |
-| Official package | `OpenAI.Codex` `26.810.52044` |
+| Official package | `OpenAI.Codex` `26.810.7004.0` |
 | Official executable product version | `151.0.7922.137` |
 | Official bundle build | `6662` |
 | `app.asar` SHA-256 | `c7ac6d76cf5f30aa5cb92e1e46561933c06e94e3fe2d6582a04dac18c76f3ed1` |
@@ -44,7 +44,7 @@ The Windows adapter was exercised against the locally installed package with:
 | --- | --- |
 | Platform | Windows x64 |
 | Official package | `OpenAI.Codex` |
-| Official app version | `26.810.52044` |
+| Official app package version | `26.810.7004.0` |
 | Official bundle build | `6662` |
 | `app.asar` SHA-256 | `c7ac6d76cf5f30aa5cb92e1e46561933c06e94e3fe2d6582a04dac18c76f3ed1` |
 | Official package CLI asset | `resources\\codex.exe` (integrity reference) |

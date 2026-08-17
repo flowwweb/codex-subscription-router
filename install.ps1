@@ -191,6 +191,10 @@ Assert-NoPathCollision "source checkout" $normalizedSourceRoot "router install" 
 
 $official = Get-AbsolutePath (Resolve-OfficialExecutable -ExplicitPath $OfficialExecutable)
 $officialRoot = Split-Path -Parent $official
+$officialPackage = Get-AppxPackage -Name "OpenAI.Codex" -ErrorAction SilentlyContinue |
+    Where-Object { (Get-NormalizedPath $_.InstallLocation) -eq (Get-NormalizedPath $officialRoot) } |
+    Select-Object -First 1
+$officialPackageVersion = if ($officialPackage) { [string]$officialPackage.Version } else { "unpackaged" }
 $officialCodex = Join-Path $officialRoot "resources\codex.exe"
 if (-not (Test-Path -LiteralPath $officialCodex -PathType Leaf)) {
     Fail "the official app does not contain resources\\codex.exe: $officialCodex"
@@ -257,6 +261,7 @@ $config = [ordered]@{
     stateRoot = $stateRoot
     primaryCodexHome = $primaryCodexHome
     officialVersion = (Get-Item -LiteralPath $official).VersionInfo.ProductVersion
+    officialPackageVersion = $officialPackageVersion
     appAsarSha256 = $beforeAsarHash
     officialCodexSha256 = $beforeCodexHash
     codexBackendSha256 = $beforeBackendHash

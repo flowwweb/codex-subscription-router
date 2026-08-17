@@ -92,7 +92,7 @@
       login.textContent = pending ? 'Cancel sign-in' : 'Connect';
       login.addEventListener('click', () => pending ? cancelLogin(account.id, pending) : connectAccount(account.id));
       const remove = fragment.querySelector('.remove');
-      remove.hidden = account.controller || account.connected;
+      remove.hidden = account.controller;
       remove.addEventListener('click', () => removeAccount(account));
       accountsNode.append(fragment);
     }

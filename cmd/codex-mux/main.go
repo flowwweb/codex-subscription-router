@@ -1,18 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	stdruntime "runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -25,6 +28,8 @@ import (
 )
 
 var buildID = "dev"
+
+const legacyControlPort = 48123
 
 func main() {
 	if err := run(); err != nil {
@@ -42,13 +47,102 @@ func run() error {
 		return runDashboardURL()
 	}
 	if isInteractiveAppServer(args) {
-		return runBridge()
+		if useDaemonBridge(stdruntime.GOOS, os.Getenv("CODEX_MUX_DAEMON_REQUIRED")) {
+			return runBridge()
+		}
+		return runDirectInteractive(args)
 	}
 	realExecutable, err := resolveRealExecutable()
 	if err != nil {
 		return err
 	}
 	return passthrough(realExecutable, args)
+}
+
+func useDaemonBridge(platform, required string) bool {
+	return platform == "windows" || required == "1"
+}
+
+// runDirectInteractive preserves the existing macOS patcher's single-process
+// contract. Windows v2 uses the persistent daemon and thin bridge instead.
+func runDirectInteractive(args []string) error {
+	realExecutable, err := resolveRealExecutable()
+	if err != nil {
+		return err
+	}
+	root, err := runtimeRoot()
+	if err != nil {
+		return err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home directory: %w", err)
+	}
+	primaryCodexHome := os.Getenv("CODEX_HOME")
+	if primaryCodexHome == "" {
+		primaryCodexHome = filepath.Join(home, ".codex")
+	}
+	store, err := state.Open(root, primaryCodexHome)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	multiplexer, err := mux.New(mux.Options{
+		RealExecutable: realExecutable,
+		RealArgs:       args,
+		Environment:    os.Environ(),
+		Store:          store,
+		Output:         os.Stdout,
+	})
+	if err != nil {
+		return err
+	}
+	if err := multiplexer.Start(ctx); err != nil {
+		return err
+	}
+	defer multiplexer.Close()
+
+	token, err := loadOrCreateToken(root)
+	if err != nil {
+		return err
+	}
+	port := legacyControlPort
+	if value := os.Getenv("CODEX_MUX_CONTROL_PORT"); value != "" {
+		if parsed, parseErr := strconv.Atoi(value); parseErr == nil && parsed > 0 && parsed <= 65535 {
+			port = parsed
+		}
+	}
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "codex-mux: account UI unavailable: %v\n", err)
+	} else {
+		controlServer := control.New(listener.Addr().String(), token, multiplexer, os.Getenv("CODEX_MUX_UI_TESTS") == "1")
+		go func() {
+			if serveErr := controlServer.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				fmt.Fprintf(os.Stderr, "codex-mux: control server: %v\n", serveErr)
+			}
+		}()
+		defer func() {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer shutdownCancel()
+			_ = controlServer.Shutdown(shutdownCtx)
+		}()
+	}
+
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
+	for scanner.Scan() {
+		message, parseErr := protocol.Parse(scanner.Bytes())
+		if parseErr != nil {
+			fmt.Fprintf(os.Stderr, "codex-mux: ignore invalid client JSON: %v\n", parseErr)
+			continue
+		}
+		multiplexer.HandleClient(message)
+	}
+	cancel()
+	return scanner.Err()
 }
 
 func runDashboardURL() error {
