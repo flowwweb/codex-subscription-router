@@ -237,6 +237,11 @@ routing for those accounts, and import all exports together. This is a one-time
 migration, not live synchronization: only one product may own refresh for the
 copied credentials.
 
+To roll back, exclude or remove every migrated subscription from this router
+before resuming those accounts in codex-lb. The router leaves codex-lb's source
+records untouched and keeps any replaced local `auth.json` as a protected
+backup under that subscription's account home.
+
 ### macOS
 
 1. Open the profile menu at the bottom of the sidebar.

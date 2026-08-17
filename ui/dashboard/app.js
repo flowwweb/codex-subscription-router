@@ -239,7 +239,7 @@
       list.append(row);
     }
     const note = document.createElement('p');
-    note.textContent = 'Import keeps any replaced auth file as a protected backup. If verification fails, keep codex-lb paused and retry this same reviewed batch; resume codex-lb only after restoring its account ownership.';
+    note.textContent = 'Import keeps any replaced auth file as a protected backup. If verification fails, keep codex-lb paused and retry this batch. To roll back later, exclude or remove every migrated subscription here before resuming those accounts in codex-lb.';
     preview.append(list, note);
     $('#migrate-codex-lb').textContent = 'Import reviewed subscriptions';
   }
