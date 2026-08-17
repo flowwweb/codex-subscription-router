@@ -41,8 +41,10 @@ shared plugin configuration.
 
 ## Network
 
-The control server binds to a dynamic numeric `127.0.0.1` endpoint. The exact
-address lives in an owner-only runtime receipt. Unexpected Host and Origin
+On Windows v2, the control server binds to a dynamic numeric `127.0.0.1`
+endpoint. The exact address lives in an owner-only runtime receipt. The
+preserved macOS direct patcher still uses its legacy fixed control port; the
+Windows endpoint-ownership proof does not extend to that path. Unexpected Host and Origin
 values, cross-origin preflights, query-token authentication, non-JSON mutation
 bodies, bootstrap replay, and missing CSRF are rejected. Profile images must
 use HTTPS. Response sizes and JSON request bodies are bounded.

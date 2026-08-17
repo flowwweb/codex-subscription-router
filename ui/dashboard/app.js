@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const state = { csrf: '', accounts: [], pending: new Map(), events: null, addKey: '' };
+  const state = { csrf: '', accounts: [], pending: new Map(), events: null, addKey: '', migrationReview: null, migrationInFlight: false };
   const $ = (selector) => document.querySelector(selector);
   const title = $('#status-title');
   const detail = $('#status-detail');
@@ -53,6 +53,15 @@
   }
 
   function render() {
+    const activeCard = document.activeElement?.closest?.('[data-account-id]');
+    const activeControl = ['enabled', 'rename', 'login', 'remove'].find((name) => document.activeElement?.classList?.contains(name));
+    const restoreFocus = () => {
+      if (!activeCard || !activeControl) return;
+      const card = Array.from(accountsNode.querySelectorAll('[data-account-id]')).find((item) => item.dataset.accountId === activeCard.dataset.accountId);
+      const replacement = card?.querySelector(`.${activeControl}`);
+      if (replacement && !replacement.hidden) replacement.focus();
+      else notice.focus();
+    };
     accountsNode.replaceChildren();
     accountsNode.setAttribute('aria-busy', 'false');
     const connected = state.accounts.filter((account) => account.connected);
@@ -61,13 +70,14 @@
       detail.textContent = 'Sign in to the ChatGPT account you want the router to use first.';
     } else {
       title.textContent = `${connected.length} subscription${connected.length === 1 ? '' : 's'} connected`;
-      detail.textContent = 'New chats use available quota. Existing chats stay with their assigned subscription.';
+      detail.textContent = 'Accounts are ready for compatible app-server clients. The official Codex Windows app does not use this router.';
     }
     if (!state.accounts.length) {
       const empty = document.createElement('p');
       empty.className = 'empty';
       empty.textContent = 'No subscriptions are configured yet.';
       accountsNode.append(empty);
+      restoreFocus();
       return;
     }
     for (const account of state.accounts) {
@@ -84,6 +94,7 @@
       const enabled = fragment.querySelector('.enabled');
       enabled.checked = Boolean(account.enabled);
       enabled.setAttribute('aria-label', `Include ${account.label || 'subscription'} in routing`);
+      fragment.querySelector('.enabled-text').textContent = enabled.checked ? 'Included in routing' : 'Excluded from routing';
       enabled.addEventListener('change', () => updateAccount(account.id, { enabled: enabled.checked }));
       fragment.querySelector('.rename').addEventListener('click', () => renameAccount(account));
       const login = fragment.querySelector('.login');
@@ -96,6 +107,7 @@
       remove.addEventListener('click', () => removeAccount(account));
       accountsNode.append(fragment);
     }
+    restoreFocus();
   }
 
   async function loadAccounts() {
@@ -125,14 +137,20 @@
     return { code, uri };
   }
 
-  function showLogin(code) {
+  function showLogin(code, uri) {
     notice.hidden = false;
     notice.setAttribute('role', 'status');
     notice.replaceChildren(document.createTextNode('Finish sign-in with code '));
     const value = document.createElement('span');
     value.className = 'code';
     value.textContent = code;
-    notice.append(value, document.createTextNode('. Waiting for ChatGPT…'));
+    notice.append(value, document.createTextNode('. '));
+    if (uri && /^https:\/\//.test(uri)) {
+      const link = document.createElement('a');
+      link.href = uri; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = 'Open ChatGPT verification';
+      notice.append(link, document.createTextNode('. '));
+    }
+    notice.append(document.createTextNode('Waiting for ChatGPT…'));
   }
 
   async function connectAccount(id) {
@@ -142,9 +160,8 @@
       const result = await api(`/v1/accounts/${encodeURIComponent(id)}/login`, { method: 'POST', body: JSON.stringify({ mode: 'chatgptDeviceCode', idempotencyKey }) });
       state.pending.set(id, { id: result.attempt.id, key: idempotencyKey });
       const info = loginDetails(result.login || result.attempt?.result);
-      if (info.code) showLogin(info.code);
+      if (info.code) showLogin(info.code, info.uri);
       else announce('Finish sign-in in the ChatGPT window. Waiting for confirmation…');
-      if (info.uri && /^https:\/\//.test(info.uri)) window.open(info.uri, '_blank', 'noopener,noreferrer');
       watchLogin(id, result.attempt.id);
     } catch (error) {
       state.pending.delete(id); render(); announce(`We couldn’t connect this subscription. ${error.message}`, true);
@@ -196,33 +213,91 @@
     } catch (error) { announce(error.message, true); }
   }
 
+  function migrationSignature(files) {
+    return files.map((file) => `${file.name}:${file.size}:${file.lastModified}`).join('|');
+  }
+
+  function canonicalExport(exported) {
+    let auth = exported?.codex_auth_json ?? exported;
+    if (!exported?.codex_auth_json && typeof exported?.auth_json === 'string') auth = JSON.parse(exported.auth_json);
+    if (typeof auth === 'string') auth = JSON.parse(auth);
+    const tokens = auth?.tokens || {};
+    if (auth?.auth_mode !== 'chatgpt' || !tokens.id_token || !tokens.access_token || !tokens.refresh_token || !tokens.account_id || !auth.last_refresh) {
+      throw new Error('This file is not a complete Codex ChatGPT auth export.');
+    }
+    return { exported, sourceAccountId: tokens.account_id };
+  }
+
+  function showMigrationReview(review) {
+    const preview = $('#migration-preview');
+    preview.replaceChildren(); preview.hidden = false;
+    const heading = document.createElement('strong'); heading.textContent = 'Review this one-time migration'; preview.append(heading);
+    const list = document.createElement('ul');
+    for (const item of review.items) {
+      const row = document.createElement('li');
+      row.textContent = `${item.file.name} (${item.sourceAccountId}) → ${item.targetLabel}`;
+      list.append(row);
+    }
+    const note = document.createElement('p');
+    note.textContent = 'Import keeps any replaced auth file as a protected backup. If verification fails, keep codex-lb paused and retry this same reviewed batch; resume codex-lb only after restoring its account ownership.';
+    preview.append(list, note);
+    $('#migrate-codex-lb').textContent = 'Import reviewed subscriptions';
+  }
+
+  async function prepareMigration(files) {
+    const disconnected = state.accounts.filter((account) => !account.connected);
+    const batchKey = requestKey();
+    const items = [];
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const parsed = canonicalExport(JSON.parse(await file.text()));
+      const target = disconnected[index];
+      items.push({ ...parsed, file, targetId: target?.id || '', targetLabel: target?.label || `Migrated subscription ${index + 1}`, createKey: `codex-lb-${batchKey}-${index}` });
+    }
+    return { signature: migrationSignature(files), items };
+  }
+
   async function migrateCodexLB() {
     const files = Array.from($('#codex-lb-files').files || []);
     if (!files.length) return announce('Choose at least one codex-lb auth export.', true);
     if (!$('#codex-lb-paused').checked) return announce('Pause codex-lb routing for these accounts before importing.', true);
-    const claimed = new Set();
-    let migrated = 0;
-    for (const file of files) {
+    if (state.migrationInFlight) return;
+    const signature = migrationSignature(files);
+    if (!state.migrationReview || state.migrationReview.signature !== signature) {
       try {
-        const exported = JSON.parse(await file.text());
-        let target = state.accounts.find((account) => !account.connected && !claimed.has(account.id));
-        if (!target) {
-          const created = await api('/v1/accounts', { method: 'POST', body: JSON.stringify({ label: `Migrated subscription ${migrated + 1}`, idempotencyKey: `codex-lb-${requestKey()}` }) });
-          target = created.account;
-          state.accounts.push(target);
+        state.migrationReview = await prepareMigration(files);
+        showMigrationReview(state.migrationReview);
+        return announce('Review the account mapping, then choose Import reviewed subscriptions.');
+      } catch (error) {
+        state.migrationReview = null;
+        return announce(`Migration review failed. ${error.message}`, true);
+      }
+    }
+    state.migrationInFlight = true;
+    const button = $('#migrate-codex-lb'); button.disabled = true;
+    let migrated = 0;
+    let backups = 0;
+    for (const item of state.migrationReview.items) {
+      try {
+        if (!item.targetId) {
+          const created = await api('/v1/accounts', { method: 'POST', body: JSON.stringify({ label: item.targetLabel, idempotencyKey: item.createKey }) });
+          item.targetId = created.account.id;
         }
-        claimed.add(target.id);
-        await api(`/v1/accounts/${encodeURIComponent(target.id)}/import/codex-lb`, {
-          method: 'POST', body: JSON.stringify({ export: exported, sourcePaused: true })
+        const result = await api(`/v1/accounts/${encodeURIComponent(item.targetId)}/import/codex-lb`, {
+          method: 'POST', body: JSON.stringify({ export: item.exported, sourcePaused: true })
         });
+        if (result.backupAvailable) backups += 1;
         migrated += 1;
       } catch (error) {
+        state.migrationInFlight = false; button.disabled = false;
         await loadAccounts().catch(() => {});
-        return announce(`Imported ${migrated} of ${files.length}. ${file.name}: ${error.message}`, true);
+        return announce(`Imported ${migrated} of ${files.length}. ${item.file.name}: ${error.message} Retry this reviewed batch while codex-lb stays paused.`, true);
       }
     }
     await loadAccounts();
-    announce(`${migrated} subscription${migrated === 1 ? '' : 's'} migrated from codex-lb.`);
+    state.migrationInFlight = false; state.migrationReview = null; button.disabled = false; button.textContent = 'Review migration';
+    $('#migration-preview').hidden = true;
+    announce(`${migrated} subscription${migrated === 1 ? '' : 's'} migrated from codex-lb. ${backups ? `${backups} protected backup${backups === 1 ? '' : 's'} kept for rollback.` : 'No existing auth files needed backup.'}`);
   }
 
   function setOffline(error) {
@@ -243,7 +318,10 @@
   async function start() {
     try {
       await establishSession();
-      await api('/v1/health');
+      const health = await api('/v1/health');
+      $('#technical-build').textContent = health.technical?.build || 'Unavailable';
+      $('#technical-state').textContent = health.technical?.stateRoot || 'Unavailable';
+      $('#technical-primary').textContent = health.technical?.primaryCodexHome || 'Unavailable';
       badge.textContent = 'Running'; badge.classList.remove('offline');
       await loadAccounts(); subscribe();
     } catch (error) { setOffline(error); }
@@ -251,5 +329,6 @@
 
   $('#connect').addEventListener('click', addOrConnect);
   $('#migrate-codex-lb').addEventListener('click', migrateCodexLB);
+  $('#codex-lb-files').addEventListener('change', () => { state.migrationReview = null; $('#migration-preview').hidden = true; $('#migrate-codex-lb').textContent = 'Review migration'; });
   start();
 })();

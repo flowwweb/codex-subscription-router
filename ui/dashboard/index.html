@@ -26,7 +26,7 @@
         </div>
         <button id="connect" class="primary" type="button">Connect subscription</button>
       </div>
-      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div id="notice" class="notice" role="status" aria-live="polite" tabindex="-1" hidden></div>
       <div id="accounts" class="accounts" aria-busy="true"></div>
       <details class="migration">
         <summary>Use subscriptions already connected in codex-lb</summary>
@@ -35,7 +35,8 @@
         <label class="file-label" for="codex-lb-files">Choose one or more exported JSON files</label>
         <input id="codex-lb-files" type="file" accept="application/json,.json" multiple>
         <label class="confirm-label"><input id="codex-lb-paused" type="checkbox"> I paused codex-lb routing for these accounts.</label>
-        <button id="migrate-codex-lb" class="secondary" type="button">Import subscriptions</button>
+        <div id="migration-preview" class="migration-preview" aria-live="polite" hidden></div>
+        <button id="migrate-codex-lb" class="secondary" type="button">Review migration</button>
       </details>
     </section>
 
@@ -46,7 +47,10 @@
 
     <details>
       <summary>Technical details</summary>
-      <p>Runs locally on this computer. Account credentials stay in the router’s protected account homes.</p>
+      <p>Build: <code id="technical-build">Loading…</code></p>
+      <p>Router state: <code id="technical-state">Loading…</code></p>
+      <p>Primary account home: <code id="technical-primary">Loading…</code></p>
+      <p>Runs locally on this computer. Account credentials stay in these protected account homes.</p>
     </details>
   </main>
   <template id="account-template">
@@ -57,7 +61,7 @@
         <div class="usage"></div>
       </div>
       <div class="account-actions">
-        <label class="toggle-label"><input class="enabled" type="checkbox"><span></span></label>
+        <label class="toggle-label"><input class="enabled" type="checkbox"><span class="enabled-text">Included in routing</span></label>
         <button class="rename secondary" type="button">Rename</button>
         <button class="login secondary" type="button">Connect</button>
         <button class="remove secondary" type="button" hidden>Remove</button>

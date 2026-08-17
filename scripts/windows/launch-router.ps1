@@ -1,11 +1,12 @@
 [CmdletBinding()]
 param(
+    [string] $InstallRoot,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]] $ArgumentList
 )
 
 $ErrorActionPreference = "Stop"
-$installRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$installRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { $InstallRoot }
 $configPath = Join-Path $installRoot "router-config.json"
 
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {

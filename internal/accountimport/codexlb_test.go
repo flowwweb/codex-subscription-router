@@ -2,6 +2,7 @@ package accountimport
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,6 +65,45 @@ func TestImportCodexLBEnvelopeBacksUpDestinationWithoutReturningSecrets(t *testi
 		if !strings.Contains(string(installed), expected) {
 			t.Fatalf("installed auth is missing %q", expected)
 		}
+	}
+}
+
+func TestRollbackCodexLBImportRestoresPriorCredentialAndKeepsBackup(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(home, "auth.json")
+	if err := os.WriteFile(target, []byte("old-auth"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ImportCodexLBExport(home, []byte(canonicalFixture), Options{SourcePaused: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RollbackCodexLBImport(home, result); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(restored) != "old-auth" {
+		t.Fatalf("restored auth = %q", restored)
+	}
+	if _, err := os.Stat(result.BackupPath); err != nil {
+		t.Fatalf("backup was not retained: %v", err)
+	}
+}
+
+func TestRollbackCodexLBImportRemovesNewCredentialWithoutPriorAuth(t *testing.T) {
+	home := t.TempDir()
+	result, err := ImportCodexLBExport(home, []byte(canonicalFixture), Options{SourcePaused: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RollbackCodexLBImport(home, result); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "auth.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("new auth survived rollback: %v", err)
 	}
 }
 

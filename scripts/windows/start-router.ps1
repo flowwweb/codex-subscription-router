@@ -1,8 +1,8 @@
 [CmdletBinding()]
-param([int] $ReadyTimeoutSeconds = 30)
+param([int] $ReadyTimeoutSeconds = 30, [string] $InstallRoot)
 
 $ErrorActionPreference = "Stop"
-$installRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$installRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { $InstallRoot }
 $configPath = Join-Path $installRoot "router-config.json"
 
 function Fail([string] $Message) { throw "Router start failed: $Message" }
@@ -44,6 +44,15 @@ $existing = Get-RuntimeReceipt
 if (Test-Runtime $existing) {
     Write-Output ($existing | ConvertTo-Json -Compress)
     exit 0
+}
+if ($existing -and -not [string]::IsNullOrWhiteSpace([string]$existing.address) -and -not [string]::IsNullOrWhiteSpace([string]$existing.instance)) {
+    $previousPid = [int]$existing.pid
+    $recordedProcess = if ($previousPid -gt 0) { Get-Process -Id $previousPid -ErrorAction SilentlyContinue } else { $null }
+    if (-not $recordedProcess) {
+        $staleReceiptPath = Join-Path $config.stateRoot "runtime.json"
+        Remove-Item -LiteralPath $staleReceiptPath -Force -ErrorAction Stop
+        $existing = $null
+    }
 }
 if ($existing -and -not [string]::IsNullOrWhiteSpace([string]$existing.address) -and -not [string]::IsNullOrWhiteSpace([string]$existing.instance)) {
     $previousPid = [int]$existing.pid

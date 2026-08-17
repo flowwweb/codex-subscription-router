@@ -6,6 +6,7 @@ $files = @(
     (Join-Path $root "scripts\windows\launch-router.ps1"),
     (Join-Path $root "scripts\windows\start-router.ps1"),
     (Join-Path $root "scripts\windows\open-dashboard.ps1")
+    (Join-Path $root "scripts\windows\verify-installed-router.ps1")
 )
 
 foreach ($file in $files) {

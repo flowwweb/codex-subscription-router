@@ -35,7 +35,7 @@ function Resolve-OfficialExecutable {
         Sort-Object Version -Descending |
         Select-Object -First 1
     if ($package) {
-        $candidate = Join-Path $package.InstallLocation "ChatGPT.exe"
+        $candidate = Join-Path $package.InstallLocation "app\ChatGPT.exe"
         if (Test-Path -LiteralPath $candidate -PathType Leaf) {
             return $candidate
         }
@@ -45,7 +45,7 @@ function Resolve-OfficialExecutable {
     $candidates = @()
     if (Test-Path -LiteralPath $windowsApps -PathType Container) {
         $candidates = Get-ChildItem -LiteralPath $windowsApps -Directory -Filter "OpenAI.Codex_*" -ErrorAction SilentlyContinue |
-            ForEach-Object { Join-Path $_.FullName "ChatGPT.exe" } |
+            ForEach-Object { Join-Path $_.FullName "app\ChatGPT.exe" } |
             Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
             Sort-Object -Descending
     }
@@ -225,6 +225,9 @@ $stagingRoot = Join-Path $versionsRoot (".staging-{0}" -f [Guid]::NewGuid().ToSt
 $versionRoot = Join-Path $versionsRoot $buildId
 $stagedMuxExecutable = Join-Path $stagingRoot "codex-mux.exe"
 $muxExecutable = Join-Path $versionRoot "codex-mux.exe"
+$startScript = Join-Path $versionRoot "start-router.ps1"
+$launchScript = Join-Path $versionRoot "launch-router.ps1"
+$dashboardScript = Join-Path $versionRoot "open-dashboard.ps1"
 
 New-Item -ItemType Directory -Force -Path $installRoot,$stateRoot,$primaryCodexHome,$versionsRoot,$stagingRoot | Out-Null
 
@@ -240,19 +243,9 @@ try {
 if (Test-Path -LiteralPath $versionRoot) { Fail "version directory already exists: $versionRoot" }
 Move-Item -LiteralPath $stagingRoot -Destination $versionRoot
 $muxHash = (Get-FileHash -LiteralPath $muxExecutable -Algorithm SHA256).Hash
-
-foreach ($script in @(
-    @{ Source = "scripts\windows\launch-router.ps1"; Destination = "launch-router.ps1" },
-    @{ Source = "scripts\windows\launch-router.cmd"; Destination = "Codex Subscription Router.cmd" },
-    @{ Source = "scripts\windows\start-router.ps1"; Destination = "start-router.ps1" },
-    @{ Source = "scripts\windows\open-dashboard.ps1"; Destination = "open-dashboard.ps1" },
-    @{ Source = "scripts\windows\open-dashboard.cmd"; Destination = "Open Subscription Router.cmd" }
-)) {
-    $destination = Join-Path $installRoot $script.Destination
-    $temporary = $destination + ".new"
-    Copy-Item -LiteralPath (Join-Path $sourceRoot $script.Source) -Destination $temporary -Force
-    Move-Item -LiteralPath $temporary -Destination $destination -Force
-}
+Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\start-router.ps1") -Destination $startScript
+Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\launch-router.ps1") -Destination $launchScript
+Copy-Item -LiteralPath (Join-Path $sourceRoot "scripts\windows\open-dashboard.ps1") -Destination $dashboardScript
 
 $config = [ordered]@{
     schemaVersion = 2
@@ -262,6 +255,9 @@ $config = [ordered]@{
     codexBackendExecutable = $codexBackend
     muxExecutable = $muxExecutable
     muxSha256 = $muxHash
+    startScript = $startScript
+    launchScript = $launchScript
+    dashboardScript = $dashboardScript
     stateRoot = $stateRoot
     primaryCodexHome = $primaryCodexHome
     officialVersion = (Get-Item -LiteralPath $official).VersionInfo.ProductVersion
@@ -288,17 +284,16 @@ if ($previousConfigObject -and [int]$previousConfigObject.schemaVersion -lt 2 -a
             }
     }
 }
-$configTemporary = $configPath + ".new"
-$config | ConvertTo-Json | Set-Content -LiteralPath $configTemporary -Encoding UTF8
-Move-Item -LiteralPath $configTemporary -Destination $configPath -Force
-Set-PrivateStateAcl $stateRoot
-Set-PrivateStateAcl $primaryCodexHome
-
 $afterAsarHash = (Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash
 $afterCodexHash = (Get-FileHash -LiteralPath $officialCodex -Algorithm SHA256).Hash
 if ($beforeAsarHash -ne $afterAsarHash -or $beforeCodexHash -ne $afterCodexHash) {
     Fail "official package hash changed during installation"
 }
+$configTemporary = $configPath + ".new"
+$config | ConvertTo-Json | Set-Content -LiteralPath $configTemporary -Encoding UTF8
+Move-Item -LiteralPath $configTemporary -Destination $configPath -Force
+Set-PrivateStateAcl $stateRoot
+Set-PrivateStateAcl $primaryCodexHome
 
 $stateReceipt = [ordered]@{
     installed = $true
@@ -321,16 +316,30 @@ Write-Output (ConvertTo-Json -Depth 3 $stateReceipt)
 
 if (-not $NoLaunch) {
     try {
-        $runtimeReceipt = & (Join-Path $installRoot "start-router.ps1") | Select-Object -Last 1 | ConvertFrom-Json
+        $runtimeReceipt = & $startScript -InstallRoot $installRoot | Select-Object -Last 1 | ConvertFrom-Json
     } catch {
         if ($previousConfig) {
             $previousConfig | Set-Content -LiteralPath $configPath -Encoding UTF8
             try {
                 $previous = $previousConfig | ConvertFrom-Json
-                if ([int]$previous.schemaVersion -ge 2) { & (Join-Path $installRoot "start-router.ps1") | Out-Null }
+                $previousStart = if (-not [string]::IsNullOrWhiteSpace([string]$previous.startScript)) { [string]$previous.startScript } else { Join-Path $installRoot "start-router.ps1" }
+                if ([int]$previous.schemaVersion -ge 2) { & $previousStart -InstallRoot $installRoot | Out-Null }
             } catch {}
         }
         Fail "new router failed readiness and configuration was rolled back: $($_.Exception.Message)"
+    }
+
+    foreach ($script in @(
+        @{ Source = "scripts\windows\launch-router.ps1"; Destination = "launch-router.ps1" },
+        @{ Source = "scripts\windows\launch-router.cmd"; Destination = "Codex Subscription Router.cmd" },
+        @{ Source = "scripts\windows\start-router.ps1"; Destination = "start-router.ps1" },
+        @{ Source = "scripts\windows\open-dashboard.ps1"; Destination = "open-dashboard.ps1" },
+        @{ Source = "scripts\windows\open-dashboard.cmd"; Destination = "Open Subscription Router.cmd" }
+    )) {
+        $destination = Join-Path $installRoot $script.Destination
+        $temporary = $destination + ".new"
+        Copy-Item -LiteralPath (Join-Path $sourceRoot $script.Source) -Destination $temporary -Force
+        Move-Item -LiteralPath $temporary -Destination $destination -Force
     }
 
     $taskService = New-Object -ComObject "Schedule.Service"
@@ -341,6 +350,8 @@ if (-not $NoLaunch) {
     $taskDefinition.Settings.StartWhenAvailable = $true
     $taskDefinition.Settings.ExecutionTimeLimit = "PT0S"
     $taskDefinition.Settings.MultipleInstances = 2
+    $taskDefinition.Settings.DisallowStartIfOnBatteries = $false
+    $taskDefinition.Settings.StopIfGoingOnBatteries = $false
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     $taskDefinition.Principal.UserId = $identity
     $taskDefinition.Principal.LogonType = 3
@@ -349,11 +360,11 @@ if (-not $NoLaunch) {
     $trigger.UserId = $identity
     $action = $taskDefinition.Actions.Create(0)
     $action.Path = Join-Path $PSHOME "powershell.exe"
-    $action.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $installRoot 'start-router.ps1')`""
+    $action.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$startScript`" -InstallRoot `"$installRoot`""
     $action.WorkingDirectory = $installRoot
     $taskService.GetFolder("\").RegisterTaskDefinition("Codex Subscription Router", $taskDefinition, 6, $identity, $null, 3, $null) | Out-Null
 
-    $dashboardUrl = & (Join-Path $installRoot "open-dashboard.ps1") | Select-Object -Last 1
+    $dashboardUrl = & $dashboardScript -InstallRoot $installRoot | Select-Object -Last 1
     Write-Output (ConvertTo-Json -Compress -InputObject ([ordered]@{
         routerPid = [int]$runtimeReceipt.pid
         routerBuild = [string]$runtimeReceipt.build
@@ -361,4 +372,16 @@ if (-not $NoLaunch) {
         dashboardUrl = [string]$dashboardUrl
         launchAtSignIn = $true
     }))
+}
+
+if ($NoLaunch) {
+    foreach ($script in @(
+        @{ Source = "scripts\windows\launch-router.ps1"; Destination = "launch-router.ps1" },
+        @{ Source = "scripts\windows\launch-router.cmd"; Destination = "Codex Subscription Router.cmd" },
+        @{ Source = "scripts\windows\start-router.ps1"; Destination = "start-router.ps1" },
+        @{ Source = "scripts\windows\open-dashboard.ps1"; Destination = "open-dashboard.ps1" },
+        @{ Source = "scripts\windows\open-dashboard.cmd"; Destination = "Open Subscription Router.cmd" }
+    )) {
+        Copy-Item -LiteralPath (Join-Path $sourceRoot $script.Source) -Destination (Join-Path $installRoot $script.Destination) -Force
+    }
 }

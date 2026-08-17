@@ -28,6 +28,12 @@ type Options struct {
 	Now          func() time.Time
 }
 
+type TechnicalDetails struct {
+	Build            string `json:"build"`
+	StateRoot        string `json:"stateRoot"`
+	PrimaryCodexHome string `json:"primaryCodexHome"`
+}
+
 type browserSession struct {
 	csrf      string
 	expiresAt time.Time
@@ -46,6 +52,7 @@ type Server struct {
 	bootstrapTTL time.Duration
 	sessionTTL   time.Duration
 	now          func() time.Time
+	technical    TechnicalDetails
 }
 
 func New(address, token string, multiplexer *mux.Multiplexer, uiTests bool) *Server {
@@ -132,6 +139,8 @@ func (s *Server) IssueBootstrap(baseURL string) (string, error) {
 }
 
 func (s *Server) Handler() http.Handler { return s.http.Handler }
+
+func (s *Server) SetTechnicalDetails(details TechnicalDetails) { s.technical = details }
 
 func (s *Server) combinedProfile(response http.ResponseWriter, request *http.Request) {
 	if !s.authorized(request) {
@@ -243,7 +252,11 @@ func (s *Server) health(response http.ResponseWriter, request *http.Request) {
 		methodNotAllowed(response)
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"ok": true})
+	payload := map[string]any{"ok": true}
+	if s.authorized(request) {
+		payload["technical"] = s.technical
+	}
+	writeJSON(response, http.StatusOK, payload)
 }
 
 func (s *Server) accounts(response http.ResponseWriter, request *http.Request) {

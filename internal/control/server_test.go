@@ -195,3 +195,21 @@ func TestDashboardUsesStrictSecurityHeaders(t *testing.T) {
 		t.Fatalf("missing strict CSP: %q", response.Header().Get("Content-Security-Policy"))
 	}
 }
+
+func TestAuthenticatedHealthIncludesTechnicalDetailsWithoutLeakingThem(t *testing.T) {
+	server := New(testHost, "token", nil, false)
+	server.SetTechnicalDetails(TechnicalDetails{Build: "build-123", StateRoot: `C:\private\state`, PrimaryCodexHome: `C:\private\primary`})
+	public := request(server, http.MethodGet, "/v1/health", "")
+	if strings.Contains(public.Body.String(), "private") {
+		t.Fatal("unauthenticated health leaked local support paths")
+	}
+	cookie, _, _ := bootstrap(t, server)
+	req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/v1/health", nil)
+	req.Host = testHost
+	req.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, req)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "build-123") || !strings.Contains(response.Body.String(), "primary") {
+		t.Fatalf("authenticated health omitted technical details: %s", response.Body.String())
+	}
+}

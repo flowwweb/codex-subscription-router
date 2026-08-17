@@ -115,6 +115,33 @@ func ImportCodexLBExport(accountHome string, raw []byte, options Options) (Resul
 	return Result{AccountID: auth.Tokens.AccountID, BackupPath: backupPath}, nil
 }
 
+// RollbackCodexLBImport restores the pre-migration credential, or removes the
+// newly installed credential when no prior auth file existed. Backups are kept
+// so the recovery remains inspectable and repeatable.
+func RollbackCodexLBImport(accountHome string, result Result) error {
+	target := filepath.Join(accountHome, "auth.json")
+	if result.BackupPath == "" {
+		if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove failed migrated auth: %w", err)
+		}
+		return nil
+	}
+	relative, err := filepath.Rel(accountHome, result.BackupPath)
+	if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) || filepath.Base(result.BackupPath) != "auth.json" {
+		return errors.New("migration backup path is outside the account home")
+	}
+	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove failed migrated auth: %w", err)
+	}
+	if err := copyFile(result.BackupPath, target); err != nil {
+		return fmt.Errorf("restore auth backup: %w", err)
+	}
+	if err := state.SecureFile(target); err != nil {
+		return fmt.Errorf("secure restored auth ACL: %w", err)
+	}
+	return nil
+}
+
 func canonicalAuth(raw []byte) ([]byte, error) {
 	var envelope struct {
 		CodexAuthJSON json.RawMessage `json:"codex_auth_json"`

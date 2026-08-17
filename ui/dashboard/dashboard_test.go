@@ -14,6 +14,9 @@ func TestStaticDashboardContracts(t *testing.T) {
 		"Technical details",
 		"official Codex Windows app does not currently route through it",
 		`aria-live="polite"`,
+		"Included in routing",
+		"migration-preview",
+		"technical-build",
 	} {
 		if !strings.Contains(html, text) {
 			t.Errorf("index is missing %q", text)
@@ -24,7 +27,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("CSS is missing %q", contract)
 		}
 	}
-	for _, contract := range []string{"history.replaceState", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for ChatGPT", "Subscription connected", "sourcePaused: true", "Sign-in cancelled", "account.controller"} {
+	for _, contract := range []string{"history.replaceState", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for ChatGPT", "Subscription connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this one-time migration", "backupAvailable", "Open ChatGPT verification", "restoreFocus"} {
 		if !strings.Contains(js, contract) {
 			t.Errorf("JavaScript is missing %q", contract)
 		}

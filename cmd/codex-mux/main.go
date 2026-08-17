@@ -119,6 +119,7 @@ func runDirectInteractive(args []string) error {
 		fmt.Fprintf(os.Stderr, "codex-mux: account UI unavailable: %v\n", err)
 	} else {
 		controlServer := control.New(listener.Addr().String(), token, multiplexer, os.Getenv("CODEX_MUX_UI_TESTS") == "1")
+		controlServer.SetTechnicalDetails(control.TechnicalDetails{Build: buildID, StateRoot: root, PrimaryCodexHome: primaryCodexHome})
 		go func() {
 			if serveErr := controlServer.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 				fmt.Fprintf(os.Stderr, "codex-mux: control server: %v\n", serveErr)
@@ -278,6 +279,7 @@ func runDaemon(realArgs []string) error {
 		multiplexer,
 		os.Getenv("CODEX_MUX_UI_TESTS") == "1",
 	)
+	controlServer.SetTechnicalDetails(control.TechnicalDetails{Build: buildID, StateRoot: root, PrimaryCodexHome: primaryCodexHome})
 	errorsChannel := make(chan error, 2)
 	go func() {
 		serveErr := controlServer.Serve(owner.ControlListener())

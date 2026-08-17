@@ -16,6 +16,8 @@ const (
 	jobObjectLimitKillOnJobClose      = 0x00002000
 	processSetQuota                   = 0x0100
 	processTerminate                  = 0x0001
+	processSuspendResume              = 0x0800
+	createSuspended                   = 0x00000004
 )
 
 var (
@@ -25,6 +27,8 @@ var (
 	assignProcessToJobObject = kernel32.NewProc("AssignProcessToJobObject")
 	openProcess              = kernel32.NewProc("OpenProcess")
 	closeHandle              = kernel32.NewProc("CloseHandle")
+	ntdll                    = syscall.NewLazyDLL("ntdll.dll")
+	ntResumeProcess          = ntdll.NewProc("NtResumeProcess")
 )
 
 type basicLimitInformation struct {
@@ -65,7 +69,9 @@ type Tree struct {
 	err    error
 }
 
-func Configure(_ *exec.Cmd) {}
+func Configure(command *exec.Cmd) {
+	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createSuspended}
+}
 
 func Attach(child *os.Process) (*Tree, error) {
 	job, _, createErr := createJobObjectW.Call(0, 0)
@@ -87,7 +93,7 @@ func Attach(child *os.Process) (*Tree, error) {
 	}
 
 	processHandle, _, openErr := openProcess.Call(
-		processSetQuota|processTerminate,
+		processSetQuota|processTerminate|processSuspendResume,
 		0,
 		uintptr(child.Pid),
 	)
@@ -100,6 +106,11 @@ func Attach(child *os.Process) (*Tree, error) {
 	if ok == 0 {
 		_ = tree.Terminate()
 		return nil, fmt.Errorf("assign backend process to job object: %w", assignErr)
+	}
+	status, _, resumeErr := ntResumeProcess.Call(processHandle)
+	if status != 0 {
+		_ = tree.Terminate()
+		return nil, fmt.Errorf("resume contained backend process (NTSTATUS 0x%x): %w", status, resumeErr)
 	}
 	return tree, nil
 }
