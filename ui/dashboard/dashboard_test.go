@@ -43,7 +43,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 	if _, contentType, ok := Asset("flow-wordmark.png"); !ok || contentType != "image/png" {
 		t.Fatalf("FLOW wordmark asset is unavailable: ok=%v type=%q", ok, contentType)
 	}
-	for _, removed := range []string{"Subscription Router", "Your ChatGPT subscriptions", "subscriptions connected", "flowwweb-mark.svg"} {
+	for _, removed := range []string{"Subscription Router", "Your ChatGPT subscriptions", "subscriptions connected", "Connected account", "flowwweb-mark.svg"} {
 		if strings.Contains(html+js, removed) {
 			t.Errorf("dashboard retained non-essential copy %q", removed)
 		}
@@ -58,7 +58,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("accessible dashboard styling is missing %q", contract)
 		}
 	}
-	for _, contract := range []string{"history.replaceState", "connectAttempt", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for approval", "Finishing connection", "Account connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this import", "Opening OpenAI", "Repair", "const needsRepair = Boolean(account.error)", "isPlaceholderAccount", "if (status.className)", "login.hidden = account.connected && !needsRepair", "codexMuxTrustedBrowserLoginURL", "getAll('redirect_uri')", "'/oauth/authorize'", "'/auth/callback'", "response_type", "code_challenge_method", "login?.verificationUrl", "window.open('', state.loginWindowName", "flow-openai-connect-", "popup.location.replace(uri)", "state.loginWindow.close()", "toastRegion.replaceChildren()", "finishLogin", "showLoginFinishing", "payload?.type === 'account-login'", "Ready to route", "No usage available", "hasCapacity", "% left", "showModal()"} {
+	for _, contract := range []string{"history.replaceState", "connectAttempt", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for approval", "Finishing connection", "Account connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this import", "Opening OpenAI", "Repair", "const needsRepair = Boolean(account.error)", "isPlaceholderAccount", "if (status.className)", "login.hidden = account.connected && !needsRepair", "codexMuxTrustedBrowserLoginURL", "getAll('redirect_uri')", "'/oauth/authorize'", "'/auth/callback'", "response_type", "code_challenge_method", "login?.verificationUrl", "window.open('', state.loginWindowName", "flow-openai-connect-", "popup.location.replace(uri)", "state.loginWindow.close()", "toastRegion.replaceChildren()", "finishLogin", "showLoginFinishing", "payload?.type === 'account-login'", "Ready to route", "Routing paused", "No usage available", "hasCapacity", "% left", "showModal()"} {
 		if !strings.Contains(js, contract) {
 			t.Errorf("JavaScript is missing %q", contract)
 		}
