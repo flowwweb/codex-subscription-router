@@ -1,9 +1,59 @@
 package mux
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+func TestFetchWhamProfileRequiresUsableStatsMetadata(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "valid", body: `{"stats":{},"metadata":{"stats_as_of":"2026-08-18T08:00:00Z","stats_error":null}}`},
+		{name: "provider error", body: `{"stats":{},"metadata":{"stats_as_of":"2026-08-18T08:00:00Z","stats_error":{"message":"temporarily unavailable"}}}`, wantErr: true},
+		{name: "missing timestamp", body: `{"stats":{},"metadata":{"stats_error":null}}`, wantErr: true},
+		{name: "invalid timestamp", body: `{"stats":{},"metadata":{"stats_as_of":"not-a-timestamp","stats_error":null}}`, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			var credentials authFile
+			credentials.Tokens.AccessToken = "test-token"
+			credentials.Tokens.AccountID = "test-account"
+			_, err := fetchWhamProfileWithCredentials(context.Background(), server.Client(), server.URL, credentials)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("fetch error = %v, wantErr %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestCommonStatsAsOfComparesInstants(t *testing.T) {
+	first := whamProfile{}
+	first.Metadata.StatsAsOf = "2026-08-18T10:00:00+02:00"
+	second := whamProfile{}
+	second.Metadata.StatsAsOf = "2026-08-18T09:00:00Z"
+	profiles := []profileFetchResult{
+		{profile: first},
+		{profile: second},
+	}
+	if got := commonStatsAsOf(profiles); got != "2026-08-18T08:00:00Z" {
+		t.Fatalf("common stats timestamp = %q", got)
+	}
+	if statsDatesDiffer(profiles) {
+		t.Fatal("equivalent timestamps were treated as different")
+	}
+}
 
 func TestAggregateProfileStatsMergesActivity(t *testing.T) {
 	pluginID := "browser@openai-bundled"

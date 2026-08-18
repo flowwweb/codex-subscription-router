@@ -166,8 +166,9 @@ Shortcuts are installed under
 - `Codex Subscription Router.cmd` is the stdio bridge for a compatible Codex
   app-server client.
 
-The install receipt includes package hashes, build identity, PID, and dynamic
-loopback address but never prints a credential or durable control token. The
+The install receipt includes package hashes, build identity, PID, and the
+stable loopback control endpoint but never prints a credential or durable
+control token. The
 official Store app remains unchanged; use FLOW when you want Codex traffic to
 use the connected account pool.
 
@@ -331,8 +332,9 @@ helper and socket paths and are not relocatable or intended for redistribution.
 | `%LOCALAPPDATA%\\Codex Subscription Router\\primary-codex-home` | Windows Primary credentials and account data |
 | `%LOCALAPPDATA%\\Codex Subscription Router\\versions` | Versioned Windows router binaries |
 
-The control service binds to a dynamic `127.0.0.1` port published only in a
-protected runtime receipt. Browser setup exchanges a short-lived one-use
+The control service binds to the stable `127.0.0.1:48123` endpoint. The
+readiness and bridge listeners remain private dynamic loopback listeners;
+browser setup exchanges a short-lived one-use
 fragment nonce for an HttpOnly same-site session; mutations require CSRF and
 strict Host/Origin checks. OAuth tokens stay inside their account's Codex home
 and are never returned by the router API. Windows account directories use a

@@ -10,10 +10,13 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/b-nnett/codex-subscription-router/internal/state"
 )
+
+const profileStatsCacheTTL = 5 * time.Minute
 
 type usageBucket struct {
 	StartDate string `json:"start_date"`
@@ -60,10 +63,12 @@ type whamProfile struct {
 }
 
 type CombinedProfileAccount struct {
-	ID              string `json:"id"`
-	Label           string `json:"label"`
-	PlanLabel       string `json:"planLabel,omitempty"`
-	ProfileImageURL string `json:"profileImageUrl,omitempty"`
+	ID              string            `json:"id"`
+	Label           string            `json:"label"`
+	PlanLabel       string            `json:"planLabel,omitempty"`
+	ProfileImageURL string            `json:"profileImageUrl,omitempty"`
+	Stats           *whamProfileStats `json:"stats,omitempty"`
+	StatsAsOf       string            `json:"statsAsOf,omitempty"`
 }
 
 type CombinedProfile struct {
@@ -78,6 +83,13 @@ type profileFetchResult struct {
 	err     error
 }
 
+type profileStatsCacheEntry struct {
+	profile   whamProfile
+	expiresAt time.Time
+	loading   chan struct{}
+	err       error
+}
+
 // CombinedProfile returns the native /wham/profiles/me shape with activity
 // merged across connected subscriptions. Identity remains the controller
 // account's identity, while usage is summed and streaks are recomputed from
@@ -87,7 +99,7 @@ func (m *Multiplexer) CombinedProfile(ctx context.Context) (CombinedProfile, err
 	accounts := make([]state.Account, 0, len(snapshots))
 	descriptors := make([]CombinedProfileAccount, 0, len(snapshots))
 	for _, snapshot := range snapshots {
-		if !snapshot.Enabled || !snapshot.Connected || snapshot.AuthType != "chatgpt" {
+		if !snapshot.Connected || snapshot.AuthType != "chatgpt" {
 			continue
 		}
 		account, ok := m.store.Account(snapshot.ID)
@@ -107,7 +119,7 @@ func (m *Multiplexer) CombinedProfile(ctx context.Context) (CombinedProfile, err
 	results := make(chan profileFetchResult, len(accounts))
 	for _, account := range accounts {
 		go func(account state.Account) {
-			profile, err := fetchWhamProfile(ctx, m.profileClient, profileURL, account)
+			profile, err := m.fetchWhamProfileCached(ctx, account)
 			results <- profileFetchResult{account: account, profile: profile, err: err}
 		}(account)
 	}
@@ -137,44 +149,106 @@ func (m *Multiplexer) CombinedProfile(ctx context.Context) (CombinedProfile, err
 	combined.Stats = aggregateProfileStats(profiles)
 	combined.Metadata.StatsError = nil
 	combined.Metadata.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
-	combined.Metadata.StatsAsOf = latestStatsAsOf(profiles)
+	combined.Metadata.StatsAsOf = commonStatsAsOf(profiles)
+	partial = partial || statsDatesDiffer(profiles)
+	for index := range descriptors {
+		for _, result := range profiles {
+			if result.account.ID != descriptors[index].ID {
+				continue
+			}
+			stats := result.profile.Stats
+			descriptors[index].Stats = &stats
+			descriptors[index].StatsAsOf = result.profile.Metadata.StatsAsOf
+			break
+		}
+	}
 	return CombinedProfile{Profile: combined, Accounts: descriptors, Partial: partial}, nil
 }
 
-// AccountProfile returns one subscription's native profile payload while
-// retaining the full account list used by the interactive avatar selector.
+// AccountProfile returns one subscription's native profile payload without
+// refreshing unrelated accounts.
 func (m *Multiplexer) AccountProfile(ctx context.Context, accountID string) (CombinedProfile, error) {
-	snapshots := m.Accounts(ctx)
-	descriptors := make([]CombinedProfileAccount, 0, len(snapshots))
-	var selected state.Account
-	found := false
-	for _, snapshot := range snapshots {
-		if !snapshot.Enabled || !snapshot.Connected || snapshot.AuthType != "chatgpt" {
-			continue
-		}
-		descriptors = append(descriptors, CombinedProfileAccount{
-			ID: snapshot.ID, Label: snapshot.Label, PlanLabel: snapshot.PlanLabel,
-			ProfileImageURL: snapshot.ProfileImageURL,
-		})
-		if snapshot.ID == accountID {
-			selected, found = m.store.Account(snapshot.ID)
-		}
-	}
+	selected, found := m.store.Account(accountID)
 	if !found {
 		return CombinedProfile{}, fmt.Errorf("profile account %q is unavailable", accountID)
 	}
-	profile, err := fetchWhamProfile(ctx, m.profileClient, profileURL, selected)
+	snapshot, err := m.accountSnapshotWithProfile(ctx, accountID, false)
 	if err != nil {
 		return CombinedProfile{}, err
 	}
+	if !snapshot.Connected || snapshot.AuthType != "chatgpt" {
+		return CombinedProfile{}, fmt.Errorf("profile account %q is unavailable", accountID)
+	}
+	profile, err := m.fetchWhamProfileCached(ctx, selected)
+	if err != nil {
+		return CombinedProfile{}, err
+	}
+	stats := profile.Stats
+	descriptors := []CombinedProfileAccount{{
+		ID: snapshot.ID, Label: snapshot.Label, PlanLabel: snapshot.PlanLabel,
+		ProfileImageURL: snapshot.ProfileImageURL, Stats: &stats, StatsAsOf: profile.Metadata.StatsAsOf,
+	}}
 	return CombinedProfile{Profile: profile, Accounts: descriptors}, nil
 }
 
-func fetchWhamProfile(ctx context.Context, client *http.Client, endpoint string, account state.Account) (whamProfile, error) {
-	credentials, err := readAuthFile(filepath.Join(account.CodexHome, "auth.json"))
-	if err != nil {
-		return whamProfile{}, err
+func (m *Multiplexer) fetchWhamProfileCached(ctx context.Context, account state.Account) (whamProfile, error) {
+	cacheKey := account.ID
+	credentials, credentialErr := readAuthFile(filepath.Join(account.CodexHome, "auth.json"))
+	if credentialErr == nil && credentials.Tokens.AccountID != "" {
+		cacheKey += "|" + credentials.Tokens.AccountID
 	}
+	now := m.now()
+	m.profileStatsMu.Lock()
+	if cached, ok := m.profileStatsCache[cacheKey]; ok {
+		if cached.loading != nil {
+			loading := cached.loading
+			m.profileStatsMu.Unlock()
+			select {
+			case <-loading:
+				m.profileStatsMu.Lock()
+				completed, completedOK := m.profileStatsCache[cacheKey]
+				if completedOK && completed.loading == nil {
+					profile, err := completed.profile, completed.err
+					m.profileStatsMu.Unlock()
+					return profile, err
+				}
+				m.profileStatsMu.Unlock()
+				return m.fetchWhamProfileCached(ctx, account)
+			case <-ctx.Done():
+				return whamProfile{}, ctx.Err()
+			}
+		}
+		if now.Before(cached.expiresAt) {
+			m.profileStatsMu.Unlock()
+			return cached.profile, cached.err
+		}
+	}
+	loading := make(chan struct{})
+	m.profileStatsCache[cacheKey] = profileStatsCacheEntry{loading: loading}
+	m.profileStatsMu.Unlock()
+
+	profile, err := whamProfile{}, credentialErr
+	if err == nil {
+		profile, err = fetchWhamProfileWithCredentials(ctx, m.profileClient, profileURL, credentials)
+		if err == nil {
+			latest, latestErr := readAuthFile(filepath.Join(account.CodexHome, "auth.json"))
+			if latestErr != nil || latest.Tokens.AccountID != credentials.Tokens.AccountID {
+				err = errors.New("account credentials changed during stats request")
+			}
+		}
+	}
+	m.profileStatsMu.Lock()
+	entry := profileStatsCacheEntry{profile: profile, expiresAt: now.Add(profileStatsCacheTTL), err: err}
+	if err != nil {
+		entry.expiresAt = now.Add(10 * time.Second)
+	}
+	m.profileStatsCache[cacheKey] = entry
+	close(loading)
+	m.profileStatsMu.Unlock()
+	return profile, err
+}
+
+func fetchWhamProfileWithCredentials(ctx context.Context, client *http.Client, endpoint string, credentials authFile) (whamProfile, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return whamProfile{}, fmt.Errorf("create combined profile request: %w", err)
@@ -202,6 +276,15 @@ func fetchWhamProfile(ctx context.Context, client *http.Client, endpoint string,
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	if err := decoder.Decode(&profile); err != nil {
 		return whamProfile{}, fmt.Errorf("decode combined profile: %w", err)
+	}
+	if profile.Metadata.StatsError != nil {
+		return whamProfile{}, errors.New("profile stats are unavailable")
+	}
+	if strings.TrimSpace(profile.Metadata.StatsAsOf) == "" {
+		return whamProfile{}, errors.New("profile stats timestamp is unavailable")
+	}
+	if _, err := time.Parse(time.RFC3339, profile.Metadata.StatsAsOf); err != nil {
+		return whamProfile{}, errors.New("profile stats timestamp is invalid")
 	}
 	return profile, nil
 }
@@ -338,14 +421,38 @@ func mergedStreaks(dates []string, today time.Time) (int64, int64) {
 	return current, longest
 }
 
-func latestStatsAsOf(profiles []profileFetchResult) string {
-	latest := ""
+func commonStatsAsOf(profiles []profileFetchResult) string {
+	var earliest time.Time
 	for _, profile := range profiles {
-		if profile.profile.Metadata.StatsAsOf > latest {
-			latest = profile.profile.Metadata.StatsAsOf
+		observed, err := time.Parse(time.RFC3339, profile.profile.Metadata.StatsAsOf)
+		if err != nil {
+			continue
+		}
+		if earliest.IsZero() || observed.Before(earliest) {
+			earliest = observed
 		}
 	}
-	return latest
+	if earliest.IsZero() {
+		return ""
+	}
+	return earliest.UTC().Format(time.RFC3339Nano)
+}
+
+func statsDatesDiffer(profiles []profileFetchResult) bool {
+	if len(profiles) < 2 {
+		return false
+	}
+	first, err := time.Parse(time.RFC3339, profiles[0].profile.Metadata.StatsAsOf)
+	if err != nil {
+		return true
+	}
+	for _, profile := range profiles[1:] {
+		observed, parseErr := time.Parse(time.RFC3339, profile.profile.Metadata.StatsAsOf)
+		if parseErr != nil || !observed.Equal(first) {
+			return true
+		}
+	}
+	return false
 }
 
 func stringValue(value *string) string {

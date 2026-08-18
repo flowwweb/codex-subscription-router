@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/b-nnett/codex-subscription-router/internal/accountimport"
 )
@@ -16,6 +17,9 @@ type AccountImportResult struct {
 }
 
 func (m *Multiplexer) ImportCodexLBExport(ctx context.Context, accountID string, export json.RawMessage, sourcePaused bool) (AccountImportResult, error) {
+	m.importMu.Lock()
+	defer m.importMu.Unlock()
+
 	account, ok := m.store.Account(accountID)
 	if !ok {
 		return AccountImportResult{}, fmt.Errorf("account %q not found", accountID)
@@ -25,6 +29,19 @@ func (m *Multiplexer) ImportCodexLBExport(ctx context.Context, accountID string,
 	}
 	if !sourcePaused {
 		return AccountImportResult{}, errors.New("codex-lb must be paused for this account before migration")
+	}
+	sourceAccountID, err := accountimport.CodexLBAccountID(export)
+	if err != nil {
+		return AccountImportResult{}, err
+	}
+	for _, candidate := range m.store.Accounts() {
+		if candidate.ID == account.ID {
+			continue
+		}
+		credentials, readErr := readAuthFile(filepath.Join(candidate.CodexHome, "auth.json"))
+		if readErr == nil && credentials.Tokens.AccountID == sourceAccountID {
+			return AccountImportResult{}, errors.New("codex-lb account is already connected in this router")
+		}
 	}
 	if err := m.stopChild(accountID); err != nil {
 		return AccountImportResult{}, fmt.Errorf("pause destination account before import: %w", err)

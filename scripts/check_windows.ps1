@@ -55,6 +55,12 @@ foreach ($case in @(
 )) {
     if (($case.Command -match $daemonPattern) -ne $case.Expected) { throw "Daemon command matcher misclassified: $($case.Command)" }
 }
+$ownerSource = Get-Content -LiteralPath (Join-Path $root "internal\runtime\owner.go") -Raw
+if ($ownerSource -notmatch [regex]::Escape('const stableControlAddress = "127.0.0.1:48123"') -or
+    $ownerSource -notmatch [regex]::Escape('return acquireWithControlAddress(root, build, stableControlAddress)') -or
+    $ownerSource -notmatch [regex]::Escape('net.Listen("tcp", controlAddress)')) {
+    throw "Windows daemon must reserve the stable localhost control endpoint"
+}
 $connectScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\connect-account.ps1") -Raw
 $accountClient = Get-Content -LiteralPath (Join-Path $root "cmd\codex-mux\account_client.go") -Raw
 $routerSkill = Get-Content -LiteralPath (Join-Path $root "plugins\codex-router\skills\codex-router\SKILL.md") -Raw

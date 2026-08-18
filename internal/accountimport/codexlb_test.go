@@ -28,6 +28,16 @@ func TestImportCodexLBExportRequiresPausedSource(t *testing.T) {
 	}
 }
 
+func TestCodexLBAccountIDValidatesWithoutWriting(t *testing.T) {
+	id, err := CodexLBAccountID([]byte(canonicalFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "account-123" {
+		t.Fatalf("account id = %q", id)
+	}
+}
+
 func TestImportCodexLBEnvelopeBacksUpDestinationWithoutReturningSecrets(t *testing.T) {
 	home := t.TempDir()
 	target := filepath.Join(home, "auth.json")

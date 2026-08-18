@@ -321,6 +321,21 @@ func TestBootstrapIsOneUseAndSessionSurvivesRefresh(t *testing.T) {
 	}
 }
 
+func TestBrowserSessionDoesNotSurviveServerRestart(t *testing.T) {
+	first := New(testHost, strings.Repeat("a", 64), nil, false)
+	cookie, _, _ := bootstrap(t, first)
+
+	second := New(testHost, strings.Repeat("a", 64), nil, false)
+	refresh := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/v1/session", nil)
+	refresh.Host = testHost
+	refresh.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	second.Handler().ServeHTTP(response, refresh)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("stale browser session status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestBootstrapExpires(t *testing.T) {
 	now := time.Unix(100, 0)
 	server := NewWithOptions(testHost, "token", nil, false, Options{
