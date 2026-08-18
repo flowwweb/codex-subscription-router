@@ -9,19 +9,35 @@
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/app.js" defer></script>
 </head>
-<body>
+  <body>
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+      <symbol id="icon-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+      <symbol id="icon-trash-2" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></symbol>
+      <symbol id="icon-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></symbol>
+      <symbol id="icon-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+      <symbol id="icon-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+      <symbol id="icon-sliders-horizontal" viewBox="0 0 24 24"><path d="M21 4H14M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></symbol>
+      <symbol id="icon-refresh-cw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24"><path d="m6 3 14 9-14 9V3z"/></symbol>
+      <symbol id="icon-pen-line" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+    </defs>
+  </svg>
   <header class="topbar">
     <span class="brand">
       <span class="brand-lockup">
         <img class="brand-mark" src="/assets/flowwweb-icon.png" alt="">
         <img class="brand-wordmark" src="/assets/flow-wordmark.png" alt="FLOW">
+        <span class="brand-copy"><small>Codex Router</small></span>
       </span>
-      <span class="brand-copy"><small>Codex Router</small></span>
     </span>
     <div class="top-actions">
       <span id="health-badge" class="health" aria-live="polite">Starting</span>
       <button id="open-settings" class="quiet icon-only" type="button" aria-label="Settings" title="Settings">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 8.25A3.75 3.75 0 1 0 12 15.75 3.75 3.75 0 0 0 12 8.25Zm8.25 3.75-.04-.74 1.56-1.22-1.75-3.03-1.84.75a8.8 8.8 0 0 0-1.28-.74l-.28-1.97h-3.5l-.28 1.97a8.8 8.8 0 0 0-1.28.74l-1.84-.75-1.75 3.03 1.56 1.22-.04.74.04.74-1.56 1.22 1.75 3.03 1.84-.75c.4.28.83.53 1.28.74l.28 1.97h3.5l.28-1.97c.45-.21.88-.46 1.28-.74l1.84.75 1.75-3.03-1.56-1.22.04-.74Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-settings"></use></svg>
       </button>
     </div>
   </header>
@@ -38,8 +54,18 @@
     <section class="accounts-section" aria-labelledby="accounts-title">
       <div class="section-heading">
         <h2 id="accounts-title">Accounts</h2>
+        <label class="sort-control" for="account-sort">
+          <span class="sr-only">Sort accounts</span>
+          <select id="account-sort" aria-label="Sort accounts">
+            <option value="best">Best for routing</option>
+            <option value="usage">Most used</option>
+            <option value="available">Most available</option>
+            <option value="name">Name</option>
+            <option value="recent">Recently added</option>
+          </select>
+        </label>
         <button class="primary" data-connect type="button">
-          <svg class="button-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <svg class="button-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-plus"></use></svg>
           <span>Add account</span>
         </button>
       </div>
@@ -76,13 +102,13 @@
         <span class="dialog-kicker">Account</span>
         <h2 id="remove-account-title">Remove account?</h2>
       </div>
-      <button id="close-remove-account" class="icon-button" type="button" aria-label="Close remove account dialog">×</button>
+      <button id="close-remove-account" class="icon-button" type="button" aria-label="Close remove account dialog"><svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-x"></use></svg></button>
     </div>
     <p id="remove-account-copy">The local account home will be archived for recovery.</p>
     <div class="dialog-actions">
       <button id="cancel-remove-account" class="quiet" type="button">Cancel</button>
       <button id="confirm-remove-account" class="danger-button" type="button">
-        <svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M8 7l1-2h6l1 2m-9 0 1 13h8l1-13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg class="action-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-trash-2"></use></svg>
         <span>Remove account</span>
       </button>
     </div>
@@ -91,9 +117,20 @@
   <dialog id="settings-dialog" class="dialog settings-dialog" aria-labelledby="settings-title" tabindex="-1">
     <div class="dialog-head">
       <h2 id="settings-title">Settings</h2>
-      <button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button>
+      <button id="close-settings" class="icon-button" type="button" aria-label="Close settings"><svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-x"></use></svg></button>
     </div>
     <div id="settings-toast-region" class="toast-region dialog-toast-region" aria-live="polite" aria-atomic="false"></div>
+    <section class="settings-section display-settings" aria-labelledby="display-settings-title">
+      <h3 id="display-settings-title">Display</h3>
+      <label class="setting-toggle">
+        <input id="show-spark-usage" type="checkbox">
+        <span><strong>Show Spark usage</strong><small>Show the short usage window alongside weekly usage.</small></span>
+      </label>
+      <label class="setting-toggle">
+        <input id="hide-account-emails" type="checkbox">
+        <span><strong>Hide email addresses</strong><small>Mask account emails on this screen.</small></span>
+      </label>
+    </section>
     <section class="settings-section" aria-labelledby="migration-title">
       <h3 id="migration-title">Import from codex-lb</h3>
       <p>Reuse accounts you already connected. Pause codex-lb for those accounts first so only one app refreshes their sign-in.</p>
@@ -111,7 +148,7 @@
       <dl>
         <div><dt>Build</dt><dd><code id="technical-build">Loading…</code></dd></div>
         <div><dt>State</dt><dd><code id="technical-state">Loading…</code></dd></div>
-        <div><dt>Primary account</dt><dd><code id="technical-primary">Loading…</code></dd></div>
+        <div><dt>Codex home</dt><dd><code id="technical-primary">Loading…</code></dd></div>
       </dl>
     </details>
   </dialog>
@@ -123,9 +160,9 @@
           <h3 class="account-name"></h3>
           <span class="account-plan" hidden></span>
           <span class="account-state">
-            <svg class="state-icon" data-state-icon="pause" aria-hidden="true" viewBox="0 0 24 24" hidden><path d="M8 6v12M16 6v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            <svg class="state-icon" data-state-icon="check" aria-hidden="true" viewBox="0 0 24 24" hidden><path d="m5 12 4 4L19 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <svg class="state-icon" data-state-icon="warning" aria-hidden="true" viewBox="0 0 24 24" hidden><path d="m12 4 9 16H3L12 4Z M12 9v5m0 3h.01" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg class="state-icon icon" data-state-icon="pause" aria-hidden="true" viewBox="0 0 24 24" hidden><use href="#icon-pause"></use></svg>
+            <svg class="state-icon icon" data-state-icon="check" aria-hidden="true" viewBox="0 0 24 24" hidden><use href="#icon-check"></use></svg>
+            <svg class="state-icon icon" data-state-icon="warning" aria-hidden="true" viewBox="0 0 24 24" hidden><use href="#icon-triangle-alert"></use></svg>
             <span class="state-label"></span>
           </span>
         </div>
@@ -134,29 +171,29 @@
       <div class="usage"></div>
       <div class="account-controls">
         <button class="login quiet" type="button" hidden>
-          <svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M13 5h6v6m0-6L11 13M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <svg class="action-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-external-link"></use></svg>
           <span class="login-label">Connect</span>
         </button>
         <details class="account-menu">
           <summary class="account-menu-trigger" aria-label="Account actions" title="Account actions">
-            <svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 12h2M10 12h10M4 17h10M18 17h2M14 5v4M8 10v4M14 15v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <svg class="action-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-sliders-horizontal"></use></svg>
           </summary>
           <div class="account-menu-panel" role="menu">
             <button class="refresh-account menu-action" type="button" role="menuitem">
-              <svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.7-4L4 9m0 0V5m0 4h4M4 13a8 8 0 0 0 14.7 4L20 15m0 0v4m0-4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg class="action-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-refresh-cw"></use></svg>
               <span>Refresh usage</span>
             </button>
             <button class="toggle-account menu-action" type="button" role="menuitem">
-              <svg class="action-icon" data-toggle-icon="pause" aria-hidden="true" viewBox="0 0 24 24" hidden><path d="M8 6v12M16 6v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              <svg class="action-icon" data-toggle-icon="play" aria-hidden="true" viewBox="0 0 24 24" hidden><path d="m8 5 11 7-11 7V5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              <svg class="action-icon icon" data-toggle-icon="pause" aria-hidden="true" viewBox="0 0 24 24" hidden><use href="#icon-pause"></use></svg>
+              <svg class="action-icon icon" data-toggle-icon="play" aria-hidden="true" viewBox="0 0 24 24" hidden><use href="#icon-play"></use></svg>
               <span class="toggle-copy">Pause routing</span>
             </button>
             <button class="rename menu-action" type="button" role="menuitem">
-              <svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m5 16-.8 4 4-.8L19 8.4a2.1 2.1 0 0 0-3-3L5 16Zm8-8 3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg class="action-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-pen-line"></use></svg>
               <span>Rename</span>
             </button>
             <button class="remove menu-action danger" type="button" role="menuitem" hidden>
-              <svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M8 7l1-2h6l1 2m-9 0 1 13h8l1-13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg class="action-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-trash-2"></use></svg>
               <span>Remove</span>
             </button>
           </div>

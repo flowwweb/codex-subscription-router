@@ -1,6 +1,24 @@
 (() => {
   'use strict';
-  const state = { csrf: '', accounts: [], pending: new Map(), events: null, addKey: '', migrationReview: null, migrationInFlight: false, activeLoginAccountId: '', loginWindow: null, loginWindowName: '', removeRequest: null };
+  function readPreference(key, fallback) {
+    try {
+      const value = localStorage.getItem(`flow.${key}`);
+      return value === null ? fallback : value;
+    } catch (_) { return fallback; }
+  }
+
+  function writePreference(key, value) {
+    try { localStorage.setItem(`flow.${key}`, value); } catch (_) {}
+  }
+
+  const state = {
+    csrf: '', accounts: [], pending: new Map(), events: null, addKey: '', migrationReview: null,
+    migrationInFlight: false, activeLoginAccountId: '', loginWindow: null, loginWindowName: '',
+    removeRequest: null, sort: readPreference('account-sort', 'best'),
+    showSparkUsage: readPreference('show-spark-usage', 'false') === 'true',
+    hideAccountEmails: readPreference('hide-account-emails', 'false') === 'true',
+  };
+  if (!['best', 'usage', 'available', 'name', 'recent'].includes(state.sort)) state.sort = 'best';
   const $ = (selector) => document.querySelector(selector);
   const title = $('#status-title');
   const detail = $('#status-detail');
@@ -11,6 +29,20 @@
   const loginDialog = $('#login-dialog');
   const removeDialog = $('#remove-account-dialog');
   const settingsDialog = $('#settings-dialog');
+  const accountSort = $('#account-sort');
+  const showSparkUsage = $('#show-spark-usage');
+  const hideAccountEmails = $('#hide-account-emails');
+
+  function createIcon(name, className) {
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('class', className);
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', `#icon-${name}`);
+    icon.append(use);
+    return icon;
+  }
 
   function requestKey() {
     if (crypto.randomUUID) return crypto.randomUUID();
@@ -28,13 +60,9 @@
     const toast = document.createElement('div');
     toast.className = `toast ${isError ? 'error' : 'success'}`;
     toast.setAttribute('role', isError ? 'alert' : 'status');
-    const icon = document.createElement('span');
-    icon.className = 'toast-icon';
-    icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = isError ? '!' : '✓';
     const copy = document.createElement('span');
     copy.textContent = message;
-    toast.append(icon, copy);
+    toast.append(createIcon(isError ? 'triangle-alert' : 'check', 'toast-icon icon'), copy);
     target.append(toast);
     toastTimer = isError ? 0 : window.setTimeout(() => {
       if (toast.parentNode === target) target.replaceChildren();
@@ -82,9 +110,15 @@
   }
 
   function weeklyWindow(account) {
-    const windows = [account.rateLimits?.primary, account.rateLimits?.secondary].filter(Boolean);
+    const windows = rateLimitWindows(account);
     windows.sort((left, right) => Number(left.windowDurationMins || 0) - Number(right.windowDurationMins || 0));
     return windows.at(-1) || null;
+  }
+
+  function rateLimitWindows(account) {
+    return [account.rateLimits?.primary, account.rateLimits?.secondary]
+      .filter(Boolean)
+      .sort((left, right) => Number(left.windowDurationMins || 0) - Number(right.windowDurationMins || 0));
   }
 
   function hasCapacity(account) {
@@ -110,7 +144,13 @@
   function accountDisplayName(account) {
     const label = String(account.label || '').trim();
     const generatedLabel = /^(?:Imported )?(?:OpenAI )?(?:account|subscription) \d+$/i.test(label);
-    return account.email || (label && !generatedLabel ? label : '') || 'OpenAI account';
+    const name = account.email || (label && !generatedLabel ? label : '') || 'OpenAI account';
+    if (!state.hideAccountEmails || !account.email) return name;
+    const [local, domain] = String(name).split('@');
+    if (!domain) return '••••••';
+    const suffix = domain.includes('.') ? `.${domain.split('.').at(-1)}` : '';
+    const localMask = local.length > 1 ? `${local[0]}•••` : '••••';
+    return `${localMask}@••••${suffix}`;
   }
 
   function closeAccountMenus() {
@@ -127,9 +167,7 @@
       setHealth('Setup needed', 'warning');
     } else if (usable.length) {
       title.textContent = 'Ready to route';
-      detail.textContent = attention.length
-        ? `${usable.length} available · ${attention.length} ${attention.length === 1 ? 'needs' : 'need'} attention`
-        : `${usable.length} ${usable.length === 1 ? 'account' : 'accounts'} available`;
+      detail.textContent = attention.length ? 'Some accounts need attention.' : 'Routing is ready.';
       setHealth('Ready', 'ready');
     } else if (enabled.length) {
       const nextReset = enabled.map((account) => weeklyWindow(account)?.resetsAt).filter(Boolean).sort((left, right) => left - right)[0];
@@ -160,15 +198,14 @@
   }
 
   function appendUsage(usage, account) {
-    const limits = account.rateLimits || {};
-    const windows = [
-      { window: limits.primary, fallback: 'Short-term' },
-      { window: limits.secondary, fallback: 'Weekly' },
-    ].filter((item) => item.window);
+    const allWindows = rateLimitWindows(account);
+    const windows = state.showSparkUsage || allWindows.length <= 1 ? allWindows : allWindows.slice(-1);
     for (const [index, item] of windows.entries()) {
+      const sourceIndex = allWindows.indexOf(item);
+      const isSpark = allWindows.length > 1 ? sourceIndex < allWindows.length - 1 : Number(item.window.windowDurationMins || 0) < 6 * 24 * 60;
       const remaining = Math.max(0, Math.min(100, Math.round(100 - Number(item.window.usedPercent || 0))));
-      const row = document.createElement('div'); row.className = 'usage-row';
-      const label = document.createElement('span'); label.className = 'usage-label'; label.id = `usage-${account.id}-${index}-label`; label.textContent = usageName(item.window, item.fallback);
+      const row = document.createElement('div'); row.className = `usage-row ${isSpark ? 'spark' : 'weekly'}`;
+      const label = document.createElement('span'); label.className = 'usage-label'; label.id = `usage-${account.id}-${index}-label`; label.textContent = isSpark && state.showSparkUsage ? 'Spark' : usageName(item.window, isSpark ? 'Spark' : 'Weekly');
       const value = document.createElement('span'); value.className = 'usage-value'; value.textContent = `${remaining}% left`;
       const progress = document.createElement('progress'); progress.max = 100; progress.value = remaining;
       progress.setAttribute('aria-labelledby', label.id);
@@ -180,19 +217,56 @@
     }
   }
 
+  function remaining(window) {
+    return window ? Math.max(0, Math.min(100, 100 - Number(window.usedPercent || 0))) : -1;
+  }
+
+  function compareDescending(left, right) { return right - left; }
+
+  function compareAccounts(left, right) {
+    const leftCapacity = hasCapacity(left) ? 1 : 0;
+    const rightCapacity = hasCapacity(right) ? 1 : 0;
+    if (state.sort === 'best') {
+      if (leftCapacity !== rightCapacity) return rightCapacity - leftCapacity;
+      const short = compareDescending(remaining(rateLimitWindows(left)[0]), remaining(rateLimitWindows(right)[0]));
+      if (short) return short;
+      const weekly = compareDescending(remaining(weeklyWindow(left)), remaining(weeklyWindow(right)));
+      if (weekly) return weekly;
+      if (left.threadCount !== right.threadCount) return left.threadCount - right.threadCount;
+    } else if (state.sort === 'usage') {
+      if (left.threadCount !== right.threadCount) return right.threadCount - left.threadCount;
+    } else if (state.sort === 'available') {
+      const weekly = compareDescending(remaining(weeklyWindow(left)), remaining(weeklyWindow(right)));
+      if (weekly) return weekly;
+      const short = compareDescending(remaining(rateLimitWindows(left)[0]), remaining(rateLimitWindows(right)[0]));
+      if (short) return short;
+    } else if (state.sort === 'name') {
+      const name = accountDisplayName(left).localeCompare(accountDisplayName(right), undefined, { sensitivity: 'base' });
+      if (name) return name;
+    } else if (state.sort === 'recent' && left.createdAt !== right.createdAt) {
+      return right.createdAt - left.createdAt;
+    }
+    return (left.createdAt || 0) - (right.createdAt || 0) || String(left.id).localeCompare(String(right.id));
+  }
+
+  function orderedAccounts() {
+    return [...state.accounts].sort(compareAccounts);
+  }
+
   function render() {
     const activeCard = document.activeElement?.closest?.('[data-account-id]');
     const activeControl = ['refresh-account', 'toggle-account', 'rename', 'login', 'remove'].find((name) => document.activeElement?.classList?.contains(name));
     accountsNode.replaceChildren();
     accountsNode.setAttribute('aria-busy', 'false');
     renderSummary();
+    accountSort.value = state.sort;
     document.querySelectorAll('[data-connect]').forEach((button) => { button.disabled = state.pending.size > 0; });
     if (!state.accounts.length) {
       const empty = document.createElement('p'); empty.className = 'empty';
       const heading = document.createElement('strong'); heading.textContent = 'No accounts connected';
       empty.append(heading); accountsNode.append(empty); return;
     }
-    for (const account of state.accounts) {
+    for (const account of orderedAccounts()) {
       const fragment = $('#account-template').content.cloneNode(true);
       const card = fragment.querySelector('.account-row'); card.dataset.accountId = account.id;
       const displayName = accountDisplayName(account);
@@ -201,7 +275,7 @@
       plan.textContent = account.planLabel || '';
       plan.hidden = !account.planLabel;
       fragment.querySelector('.account-identity').textContent = account.connected
-        ? (!account.enabled ? 'Routing paused' : (account.controller ? 'Primary account' : 'Ready to route'))
+        ? (!account.enabled ? 'Routing paused' : 'Ready to route')
         : (account.error || 'Not connected');
       const status = accountStatus(account);
       const statusNode = fragment.querySelector('.account-state');
@@ -632,6 +706,26 @@
   document.addEventListener('click', (event) => { if (!event.target.closest('.account-menu')) closeAccountMenus(); });
   $('#open-settings').addEventListener('click', () => { settingsDialog.showModal(); settingsDialog.focus(); });
   $('#close-settings').addEventListener('click', () => settingsDialog.close());
+  accountSort.value = state.sort;
+  accountSort.addEventListener('change', () => {
+    state.sort = accountSort.value;
+    writePreference('account-sort', state.sort);
+    render();
+  });
+  showSparkUsage.checked = state.showSparkUsage;
+  showSparkUsage.addEventListener('change', () => {
+    state.showSparkUsage = showSparkUsage.checked;
+    writePreference('show-spark-usage', String(state.showSparkUsage));
+    render();
+    announce(state.showSparkUsage ? 'Spark usage shown.' : 'Spark usage hidden.', false, true);
+  });
+  hideAccountEmails.checked = state.hideAccountEmails;
+  hideAccountEmails.addEventListener('change', () => {
+    state.hideAccountEmails = hideAccountEmails.checked;
+    writePreference('hide-account-emails', String(state.hideAccountEmails));
+    render();
+    announce(state.hideAccountEmails ? 'Email addresses hidden.' : 'Email addresses shown.', false, true);
+  });
   $('#cancel-login').addEventListener('click', cancelActiveLogin);
   loginDialog.addEventListener('cancel', (event) => { event.preventDefault(); cancelActiveLogin(); });
   $('#close-remove-account').addEventListener('click', () => closeRemoveDialog());
