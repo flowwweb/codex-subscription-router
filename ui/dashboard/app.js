@@ -212,6 +212,10 @@
       const refresh = fragment.querySelector('.refresh-account');
       refresh.setAttribute('aria-label', `Refresh usage for ${displayName}`);
       refresh.addEventListener('click', refreshAccount);
+      const menu = fragment.querySelector('.account-menu');
+      menu.querySelector('.account-menu-trigger').addEventListener('click', (event) => {
+        document.querySelectorAll('.account-menu[open]').forEach((openMenu) => { if (openMenu !== event.currentTarget.parentElement) openMenu.removeAttribute('open'); });
+      });
       const toggle = fragment.querySelector('.toggle-account');
       const toggleMode = account.enabled ? 'pause' : 'play';
       toggle.setAttribute('aria-label', `${account.enabled ? 'Pause' : 'Resume'} routing for ${displayName}`);
