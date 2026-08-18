@@ -6,6 +6,7 @@
   const detail = $('#status-detail');
   const health = $('#health-badge');
   const toastRegion = $('#toast-region');
+  const settingsToastRegion = $('#settings-toast-region');
   const accountsNode = $('#accounts');
   const loginDialog = $('#login-dialog');
   const settingsDialog = $('#settings-dialog');
@@ -17,14 +18,15 @@
   }
 
   let toastTimer = 0;
-  function announce(message, isError = false) {
-    if (!message) return;
+  function announce(message, isError = false, inSettings = false) {
+    const target = inSettings && settingsDialog.open ? settingsToastRegion : toastRegion;
     window.clearTimeout(toastTimer);
+    if (!message) { target.replaceChildren(); return; }
     toastRegion.replaceChildren();
+    settingsToastRegion.replaceChildren();
     const toast = document.createElement('div');
     toast.className = `toast ${isError ? 'error' : 'success'}`;
     toast.setAttribute('role', isError ? 'alert' : 'status');
-    toast.tabIndex = -1;
     const icon = document.createElement('span');
     icon.className = 'toast-icon';
     icon.setAttribute('aria-hidden', 'true');
@@ -32,11 +34,10 @@
     const copy = document.createElement('span');
     copy.textContent = message;
     toast.append(icon, copy);
-    toastRegion.append(toast);
-    if (isError) toast.focus({ preventScroll: true });
-    toastTimer = window.setTimeout(() => {
-      if (toast.parentNode === toastRegion) toastRegion.replaceChildren();
-    }, isError ? 6500 : 4200);
+    target.append(toast);
+    toastTimer = isError ? 0 : window.setTimeout(() => {
+      if (toast.parentNode === target) target.replaceChildren();
+    }, 4200);
   }
 
   async function api(url, options = {}) {
@@ -171,14 +172,14 @@
     renderSummary();
     if (!state.accounts.length) {
       const empty = document.createElement('p'); empty.className = 'empty';
-      const heading = document.createElement('strong'); heading.textContent = 'No accounts yet';
-      const copy = document.createElement('span'); copy.textContent = 'Add an account above, or import existing accounts from Settings.';
-      empty.append(heading, copy); accountsNode.append(empty); return;
+      const heading = document.createElement('strong'); heading.textContent = 'No accounts connected';
+      empty.append(heading); accountsNode.append(empty); return;
     }
     for (const account of state.accounts) {
       const fragment = $('#account-template').content.cloneNode(true);
       const card = fragment.querySelector('.account-row'); card.dataset.accountId = account.id;
-      fragment.querySelector('.account-name').textContent = account.email || (account.connected ? 'Connected account' : 'Connect your account');
+      const customLabel = account.label && !/^Account \d+$/.test(account.label) ? account.label : '';
+      fragment.querySelector('.account-name').textContent = account.email || customLabel || (account.connected ? 'Connected account' : 'OpenAI account');
       const plan = fragment.querySelector('.account-plan');
       plan.textContent = account.planLabel || '';
       plan.hidden = !account.planLabel;
@@ -190,7 +191,7 @@
       appendUsage(fragment.querySelector('.usage'), account);
       const enabled = fragment.querySelector('.enabled');
       enabled.checked = Boolean(account.enabled);
-      enabled.setAttribute('aria-label', `Use ${account.email || 'this account'} for routing`);
+      enabled.setAttribute('aria-label', `Use ${account.email || customLabel || 'this account'} for routing`);
       fragment.querySelector('.enabled-text').textContent = enabled.checked ? 'Use this account' : 'Account paused';
       enabled.addEventListener('change', () => updateAccount(account.id, { enabled: enabled.checked }));
       fragment.querySelector('.rename').addEventListener('click', () => renameAccount(account));
@@ -462,13 +463,13 @@
 
   async function migrateCodexLB() {
     const files = Array.from($('#codex-lb-files').files || []);
-    if (!files.length) return announce('Choose at least one codex-lb auth export.', true);
-    if (!$('#codex-lb-paused').checked) return announce('Pause codex-lb for these accounts before importing.', true);
+    if (!files.length) return announce('Choose at least one codex-lb auth export.', true, true);
+    if (!$('#codex-lb-paused').checked) return announce('Pause codex-lb for these accounts before importing.', true, true);
     if (state.migrationInFlight) return;
     const signature = migrationSignature(files);
     if (!state.migrationReview || state.migrationReview.signature !== signature) {
-      try { state.migrationReview = await prepareMigration(files); showMigrationReview(state.migrationReview); return announce('Check the account mapping, then import.'); }
-      catch (error) { state.migrationReview = null; return announce(`Couldn’t review this import. ${error.message}`, true); }
+      try { state.migrationReview = await prepareMigration(files); showMigrationReview(state.migrationReview); return announce('Check the account mapping, then import.', false, true); }
+      catch (error) { state.migrationReview = null; return announce(`Couldn’t review this import. ${error.message}`, true, true); }
     }
     state.migrationInFlight = true;
     const button = $('#migrate-codex-lb'); button.disabled = true; let imported = 0;
@@ -482,13 +483,13 @@
         imported += 1;
       } catch (error) {
         state.migrationInFlight = false; button.disabled = false; await loadAccounts().catch(() => {});
-        return announce(requestFailureMessage(error, `Imported ${imported} of ${files.length}. This account could not be imported. Try again.`), true);
+        return announce(requestFailureMessage(error, `Imported ${imported} of ${files.length}. This account could not be imported. Try again.`), true, true);
       }
     }
     state.migrationInFlight = false; state.migrationReview = null; button.disabled = false; button.textContent = 'Review import';
     $('#migration-preview').hidden = true;
-    try { await loadAccounts(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported.`); }
-    catch (_) { render(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported. Reopen FLOW to refresh the account list.`, true); }
+    try { await loadAccounts(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported.`, false, true); }
+    catch (_) { render(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported. Reopen FLOW to refresh the account list.`, true, true); }
   }
 
   function setOffline(error) {
@@ -530,7 +531,7 @@
   loginDialog.addEventListener('cancel', (event) => { event.preventDefault(); cancelActiveLogin(); });
   $('#migrate-codex-lb').addEventListener('click', migrateCodexLB);
   $('#codex-lb-files').addEventListener('change', () => {
-    state.migrationReview = null; $('#migration-preview').hidden = true; $('#migrate-codex-lb').textContent = 'Review import'; announce('');
+    state.migrationReview = null; $('#migration-preview').hidden = true; $('#migrate-codex-lb').textContent = 'Review import'; announce('', false, true);
   });
   start();
 })();

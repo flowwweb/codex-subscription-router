@@ -26,6 +26,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 		"login-dialog",
 		"Cancel sign-in",
 		"toast-region",
+		"settings-toast-region",
 		"account-plan",
 	} {
 		if !strings.Contains(html, text) {
@@ -40,7 +41,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("dashboard retained non-essential copy %q", removed)
 		}
 	}
-	for _, contract := range []string{"min-width: 0", "min-height: 44px", "min(calc(100% - 1.5rem), 46rem)", ".dialog:focus { outline: none; }", ".toast.success", ".toast.error", ".login-opening", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
+	for _, contract := range []string{"min-width: 0", "min-height: 44px", "min(calc(100% - 1.5rem), 46rem)", ".dialog:focus { outline: none; }", ".toast.success", ".toast.error", ".dialog-toast-region", ".login-opening", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
 		if !strings.Contains(css, contract) {
 			t.Errorf("CSS is missing %q", contract)
 		}
@@ -65,6 +66,9 @@ func TestStaticDashboardContracts(t *testing.T) {
 	}
 	if strings.Contains(js, "style=") {
 		t.Error("dashboard JavaScript uses an inline style that violates the dashboard CSP")
+	}
+	if strings.Contains(js, "toast.focus") {
+		t.Error("dashboard JavaScript moves focus into transient toasts")
 	}
 	for _, forbidden := range []string{"login?.deviceCode", "login?.device_code"} {
 		if strings.Contains(js, forbidden) {

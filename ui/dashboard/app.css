@@ -93,6 +93,7 @@ progress::-moz-progress-bar { background: #7662f2; border-radius: 99px; }
 .toast.error { border-color: #74403e; }
 .toast-icon { flex: 0 0 auto; width: 1.25rem; height: 1.25rem; display: grid; place-items: center; border-radius: 999px; background: #3e8069; color: #07110d; font-size: .78rem; font-weight: 800; line-height: 1; }
 .toast.error .toast-icon { background: #b85b55; color: #1b0807; }
+.dialog-toast-region { position: static; width: auto; margin: 0 0 1rem; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-.35rem); } to { opacity: 1; transform: translateY(0); } }
 .dialog { width: min(calc(100% - 2rem), 32rem); max-height: min(46rem, calc(100vh - 2rem)); overflow: auto; border: 1px solid #30323a; border-radius: 1rem; background: #0f1014; color: #f5f5f7; padding: 1.25rem; box-shadow: 0 24px 80px rgba(0,0,0,.6); }
 .dialog:focus { outline: none; }
