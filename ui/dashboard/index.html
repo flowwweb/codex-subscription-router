@@ -28,8 +28,8 @@
   <main class="shell">
     <section class="router-summary" aria-labelledby="status-title">
       <div>
-        <h1 id="status-title">Checking accounts…</h1>
-        <p id="status-detail">This will only take a moment.</p>
+        <h1 id="status-title">Loading your accounts…</h1>
+        <p id="status-detail">Checking connection and usage.</p>
       </div>
     </section>
     <section class="accounts-section" aria-labelledby="accounts-title">
@@ -37,7 +37,20 @@
         <h2 id="accounts-title">Accounts</h2>
         <button class="primary" data-connect type="button">Add account</button>
       </div>
-      <div id="accounts" class="accounts" aria-busy="true"></div>
+      <div id="accounts" class="accounts" aria-busy="true">
+        <div class="skeleton-list" aria-hidden="true">
+          <div class="skeleton-row">
+            <span class="skeleton-line skeleton-title"></span>
+            <span class="skeleton-line skeleton-meta"></span>
+            <span class="skeleton-line skeleton-control"></span>
+          </div>
+          <div class="skeleton-row">
+            <span class="skeleton-line skeleton-title"></span>
+            <span class="skeleton-line skeleton-meta"></span>
+            <span class="skeleton-line skeleton-control"></span>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
 

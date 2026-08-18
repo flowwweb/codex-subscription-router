@@ -28,6 +28,8 @@ func TestStaticDashboardContracts(t *testing.T) {
 		"toast-region",
 		"settings-toast-region",
 		"account-plan",
+		"skeleton-list",
+		"skeleton-row",
 	} {
 		if !strings.Contains(html, text) {
 			t.Errorf("index is missing %q", text)
@@ -41,7 +43,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("dashboard retained non-essential copy %q", removed)
 		}
 	}
-	for _, contract := range []string{"min-width: 0", "min-height: 44px", "min(calc(100% - 1.5rem), 46rem)", ".dialog:focus { outline: none; }", ".toast.success", ".toast.error", ".dialog-toast-region", ".login-opening", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
+	for _, contract := range []string{"min-width: 0", "min-height: 44px", "min(calc(100% - 1.5rem), 46rem)", ".dialog:focus { outline: none; }", ".toast.success", ".toast.error", ".dialog-toast-region", ".login-opening", ".skeleton-line", "@keyframes shimmer", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
 		if !strings.Contains(css, contract) {
 			t.Errorf("CSS is missing %q", contract)
 		}

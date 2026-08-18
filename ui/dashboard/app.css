@@ -58,6 +58,13 @@ p { margin: .45rem 0 0; color: #9699a5; line-height: 1.5; }
 .quiet:hover, .menu-action:hover, .icon-button:hover, .account-menu summary:hover { border-color: #555965; background: #17181e; }
 .primary:active, .quiet:active, .menu-action:active, .icon-button:active { transform: translateY(1px); }
 .accounts { display: grid; border-top: 1px solid #25272e; }
+.skeleton-list { display: grid; }
+.skeleton-row { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(17rem, 1.25fr) 5rem; align-items: center; gap: 1.4rem; min-height: 8rem; padding: 1.15rem 0; border-bottom: 1px solid #25272e; }
+.skeleton-line { display: block; height: .7rem; border-radius: 999px; background: linear-gradient(90deg, #17191f 25%, #252832 50%, #17191f 75%); background-size: 200% 100%; animation: shimmer 1.4s ease-in-out infinite; }
+.skeleton-title { width: min(12rem, 75%); }
+.skeleton-meta { width: 70%; }
+.skeleton-control { width: 3rem; justify-self: end; }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .account-row { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(17rem, 1.25fr) auto; align-items: center; gap: 1.4rem; min-height: 8rem; padding: 1.15rem 0; border-bottom: 1px solid #25272e; }
 .account-identity-block { min-width: 0; }
 .account-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
@@ -135,6 +142,9 @@ code { user-select: all; color: #b9afff; }
   .shell { padding: 2rem 0 3rem; }
   .router-summary { padding-bottom: 2rem; }
   .account-row { grid-template-columns: minmax(0, 1fr) auto; gap: .9rem; padding: 1.15rem 0; }
+  .skeleton-row { grid-template-columns: minmax(0, 1fr) 4rem; gap: .9rem; padding: 1.15rem 0; }
+  .skeleton-meta { grid-column: 1 / -1; grid-row: 2; width: 100%; }
+  .skeleton-control { grid-column: 2; grid-row: 1; }
   .usage { grid-column: 1 / -1; grid-row: 2; }
   .account-controls { grid-column: 2; grid-row: 1; }
   .health { font-size: 0; }
