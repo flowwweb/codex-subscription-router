@@ -174,6 +174,7 @@
     accountsNode.replaceChildren();
     accountsNode.setAttribute('aria-busy', 'false');
     renderSummary();
+    document.querySelectorAll('[data-connect]').forEach((button) => { button.disabled = state.pending.size > 0; });
     if (!state.accounts.length) {
       const empty = document.createElement('p'); empty.className = 'empty';
       const heading = document.createElement('strong'); heading.textContent = 'No accounts connected';
@@ -203,7 +204,7 @@
       const needsRepair = Boolean(account.error);
       login.hidden = account.connected && !needsRepair;
       login.textContent = state.pending.has(account.id) ? 'Signing in…' : (needsRepair ? 'Repair' : 'Connect');
-      login.disabled = state.pending.has(account.id);
+      login.disabled = state.pending.size > 0;
       login.addEventListener('click', () => connectAccount(account.id, openLoginWindow()));
       const remove = fragment.querySelector('.remove');
       remove.hidden = account.controller;
@@ -335,6 +336,11 @@
 
   async function connectAccount(id, popup = null) {
     if (state.pending.has(id)) return true;
+    if (state.pending.size > 0) {
+      if (popup && !popup.closed) popup.close();
+      announce('Finish the current sign-in first.', true);
+      return false;
+    }
     const idempotencyKey = requestKey();
     state.pending.set(id, { id: '', key: idempotencyKey }); render();
     try {
@@ -354,7 +360,8 @@
   async function finishLogin(accountId, attempt) {
     const current = state.pending.get(accountId);
     if (!current || current.id !== attempt.id || attempt.state === 'pending') return;
-    state.pending.delete(accountId);
+    if (current.finished) return;
+    current.finished = true;
     const terminalMessage = attempt.state === 'succeeded'
       ? 'Account connected'
       : loginFailureMessage(attempt.error, attempt.state);
@@ -371,6 +378,9 @@
         closeLoginDialog(true);
         render();
         announce(`${terminalMessage}. Reopen FLOW to refresh the account list.`, true);
+      } finally {
+        state.pending.delete(accountId);
+        render();
       }
       return;
     }
@@ -381,6 +391,9 @@
     } catch (_) {
       render();
       announce(`${terminalMessage}. Reopen FLOW to refresh the account list.`, true);
+    } finally {
+      state.pending.delete(accountId);
+      render();
     }
   }
 

@@ -48,7 +48,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("dashboard retained non-essential copy %q", removed)
 		}
 	}
-	for _, contract := range []string{"min-width: 0", "min-height: 44px", "min(calc(100% - 1.5rem), 46rem)", ".brand-wordmark", ".dialog:focus { outline: none; }", ".toast.success", ".toast.error", ".dialog-toast-region", ".login-opening", ".skeleton-line", "@keyframes shimmer", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
+	for _, contract := range []string{"min-width: 0", "min-height: 44px", "min(calc(100% - 1.5rem), 46rem)", ".brand-mark", ".brand-lockup", ".brand-wordmark", ".dialog:focus { outline: none; }", ".toast.success", ".toast.error", ".dialog-toast-region", ".login-opening", ".skeleton-line", "@keyframes shimmer", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
 		if !strings.Contains(css, contract) {
 			t.Errorf("CSS is missing %q", contract)
 		}
@@ -58,7 +58,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("accessible dashboard styling is missing %q", contract)
 		}
 	}
-	for _, contract := range []string{"history.replaceState", "connectAttempt", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for approval", "Finishing connection", "Account connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this import", "Opening OpenAI", "Repair", "const needsRepair = Boolean(account.error)", "isPlaceholderAccount", "if (status.className)", "login.hidden = account.connected && !needsRepair", "codexMuxTrustedBrowserLoginURL", "getAll('redirect_uri')", "'/oauth/authorize'", "'/auth/callback'", "response_type", "code_challenge_method", "login?.verificationUrl", "window.open('', state.loginWindowName", "flow-openai-connect-", "popup.location.replace(uri)", "state.loginWindow.close()", "toastRegion.replaceChildren()", "finishLogin", "showLoginFinishing", "payload?.type === 'account-login'", "Ready to route", "Routing paused", "No usage available", "hasCapacity", "% left", "showModal()"} {
+	for _, contract := range []string{"history.replaceState", "connectAttempt", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for approval", "Finishing connection", "Account connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this import", "Opening OpenAI", "Repair", "const needsRepair = Boolean(account.error)", "isPlaceholderAccount", "if (status.className)", "login.hidden = account.connected && !needsRepair", "codexMuxTrustedBrowserLoginURL", "getAll('redirect_uri')", "'/oauth/authorize'", "'/auth/callback'", "response_type", "code_challenge_method", "login?.verificationUrl", "window.open('', state.loginWindowName", "flow-openai-connect-", "popup.location.replace(uri)", "state.loginWindow.close()", "toastRegion.replaceChildren()", "finishLogin", "showLoginFinishing", "current.finished", "state.pending.size > 0", "Finish the current sign-in first.", "payload?.type === 'account-login'", "Ready to route", "Routing paused", "No usage available", "hasCapacity", "% left", "showModal()"} {
 		if !strings.Contains(js, contract) {
 			t.Errorf("JavaScript is missing %q", contract)
 		}

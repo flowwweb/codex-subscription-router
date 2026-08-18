@@ -777,9 +777,13 @@ func (m *Multiplexer) accountSnapshotFromChild(ctx context.Context, account stat
 		}
 		_ = json.Unmarshal(accountResult.Account, &details)
 		snapshot.AuthType = details.Type
-		snapshot.Email = details.Email
-		snapshot.PlanType = details.PlanType
-		snapshot.PlanLabel = planLabel(details.PlanType)
+		if details.Email != "" {
+			snapshot.Email = details.Email
+		}
+		if details.PlanType != "" {
+			snapshot.PlanType = details.PlanType
+		}
+		snapshot.PlanLabel = planLabel(snapshot.PlanType)
 		if details.Email != "" || details.PlanType != "" {
 			_ = m.store.SetAccountIdentity(account.ID, details.Email, details.PlanType)
 		}

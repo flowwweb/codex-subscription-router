@@ -281,7 +281,10 @@ func TestSetAccountIdentityPersistsNonSecretMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetAccountIdentity("primary", "person@example.com", "plus"); err != nil {
+	if err := store.SetAccountIdentity("primary", "person@example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetAccountIdentity("primary", "", "plus"); err != nil {
 		t.Fatal(err)
 	}
 	reopened, err := Open(root, primary)

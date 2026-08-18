@@ -22,9 +22,11 @@ a { color: #b8adff; }
   gap: 1rem;
   border-bottom: 1px solid #202127;
 }
-.brand { display: inline-flex; align-items: center; gap: .65rem; min-width: 0; }
-.brand-wordmark { width: 9.25rem; height: 2.25rem; display: block; object-fit: cover; object-position: center; border-radius: .2rem; image-rendering: auto; mix-blend-mode: screen; }
-.brand-copy { display: grid; gap: .05rem; line-height: 1; min-width: 0; }
+.brand { display: inline-flex; align-items: center; gap: .55rem; min-width: 0; }
+.brand-mark { width: 1.55rem; height: 1.55rem; display: block; image-rendering: auto; }
+.brand-lockup { display: grid; gap: .03rem; min-width: 0; }
+.brand-wordmark { width: 9.25rem; height: 1.7rem; display: block; object-fit: cover; object-position: center; border-radius: .2rem; image-rendering: auto; mix-blend-mode: screen; }
+.brand-copy { display: block; min-width: 0; padding-left: .1rem; line-height: 1; }
 .brand-copy strong { font-size: .9rem; font-weight: 760; letter-spacing: .08em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brand-copy small { color: #858894; font-size: .64rem; font-weight: 600; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .top-actions { display: flex; align-items: center; gap: .55rem; flex: 0 0 auto; position: relative; z-index: 1; }

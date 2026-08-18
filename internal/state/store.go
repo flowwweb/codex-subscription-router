@@ -364,11 +364,18 @@ func (s *Store) SetAccountIdentity(id, email, planType string) error {
 		if s.accounts[index].ID != id {
 			continue
 		}
-		if s.accounts[index].LastKnownEmail == email && s.accounts[index].LastKnownPlanType == planType {
+		changed := false
+		if email != "" && s.accounts[index].LastKnownEmail != email {
+			s.accounts[index].LastKnownEmail = email
+			changed = true
+		}
+		if planType != "" && s.accounts[index].LastKnownPlanType != planType {
+			s.accounts[index].LastKnownPlanType = planType
+			changed = true
+		}
+		if !changed {
 			return nil
 		}
-		s.accounts[index].LastKnownEmail = email
-		s.accounts[index].LastKnownPlanType = planType
 		return s.saveLocked()
 	}
 	return fmt.Errorf("account %q not found", id)
