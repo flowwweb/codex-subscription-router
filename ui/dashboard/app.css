@@ -22,11 +22,11 @@ a { color: #b8adff; }
   gap: 1rem;
   border-bottom: 1px solid #202127;
 }
-.brand { display: inline-flex; align-items: center; gap: .55rem; min-width: 0; }
+.brand { display: grid; gap: .08rem; min-width: 0; }
 .brand-mark { width: 1.55rem; height: 1.55rem; display: block; image-rendering: auto; }
-.brand-lockup { display: grid; gap: .03rem; min-width: 0; }
-.brand-wordmark { width: 9.25rem; height: 1.7rem; display: block; object-fit: cover; object-position: center; border-radius: .2rem; image-rendering: auto; mix-blend-mode: screen; }
-.brand-copy { display: block; min-width: 0; padding-left: .1rem; line-height: 1; }
+.brand-lockup { display: flex; align-items: center; gap: .55rem; min-width: 0; }
+.brand-wordmark { width: 9.25rem; height: auto; display: block; object-fit: contain; image-rendering: auto; }
+.brand-copy { display: block; min-width: 0; text-align: center; line-height: 1; }
 .brand-copy strong { font-size: .9rem; font-weight: 760; letter-spacing: .08em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brand-copy small { color: #858894; font-size: .64rem; font-weight: 600; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .top-actions { display: flex; align-items: center; gap: .55rem; flex: 0 0 auto; position: relative; z-index: 1; }
@@ -46,7 +46,7 @@ h3 { margin: 0; font-size: .95rem; letter-spacing: -.01em; }
 p { margin: .45rem 0 0; color: #9699a5; line-height: 1.5; }
 #status-detail { font-size: .92rem; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: .8rem; }
-.primary, .quiet, .menu-action, .icon-button, .account-menu summary {
+.primary, .quiet, .menu-action, .icon-button, .danger-button, .account-menu-trigger {
   border: 1px solid #30323a;
   border-radius: .65rem;
   background: #111217;
@@ -58,8 +58,10 @@ p { margin: .45rem 0 0; color: #9699a5; line-height: 1.5; }
 .primary { border-color: #7363e8; background: #6d5ce7; color: #fff; display: inline-flex; align-items: center; justify-content: center; gap: .45rem; }
 .primary:hover { background: #7b6aef; }
 .button-icon { width: 1rem; height: 1rem; flex: 0 0 auto; }
-.quiet:hover, .menu-action:hover, .icon-button:hover, .account-menu summary:hover { border-color: #555965; background: #17181e; }
-.primary:active, .quiet:active, .menu-action:active, .icon-button:active { transform: translateY(1px); }
+.quiet:hover, .menu-action:hover, .icon-button:hover, .danger-button:hover, .account-menu-trigger:hover { border-color: #555965; background: #17181e; }
+.primary:active, .quiet:active, .menu-action:active, .icon-button:active, .danger-button:active, .account-menu-trigger:active { transform: translateY(1px); }
+.login { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-height: 2.25rem; padding: .5rem .65rem; }
+.action-icon { width: 1rem; height: 1rem; flex: 0 0 auto; }
 .accounts { display: grid; border-top: 1px solid #25272e; }
 .skeleton-list { display: grid; }
 .skeleton-row { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(17rem, 1.25fr) 5rem; align-items: center; gap: 1.4rem; min-height: 8rem; padding: 1.15rem 0; border-bottom: 1px solid #25272e; }
@@ -68,12 +70,13 @@ p { margin: .45rem 0 0; color: #9699a5; line-height: 1.5; }
 .skeleton-meta { width: 70%; }
 .skeleton-control { width: 3rem; justify-self: end; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-.account-row { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(17rem, 1.25fr) auto; align-items: center; gap: 1.4rem; min-height: 8rem; padding: 1.15rem 0; border-bottom: 1px solid #25272e; }
+.account-row { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(17rem, 1.25fr) auto; align-items: center; gap: 1.4rem; min-height: 8rem; padding: 1.15rem 0; border-bottom: 1px solid #25272e; animation: account-row-in .22s ease-out both; }
 .account-identity-block { min-width: 0; }
 .account-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
 .account-plan { color: #a99df1; font-size: .68rem; font-weight: 650; letter-spacing: .03em; }
 .account-identity { margin-top: .25rem; font-size: .78rem; }
-.account-state { border-radius: 999px; background: #17191e; color: #aaaeba; padding: .2rem .45rem; font-size: .68rem; font-weight: 700; }
+.account-state { display: inline-flex; align-items: center; gap: .28rem; border-radius: 999px; background: #17191e; color: #aaaeba; padding: .2rem .45rem; font-size: .68rem; font-weight: 700; }
+.state-icon { width: .78rem; height: .78rem; flex: 0 0 auto; }
 .account-state.ready { color: #76dca5; }
 .account-state.warning { color: #e9bd78; }
 .usage { display: grid; gap: .7rem; min-width: 0; }
@@ -87,13 +90,22 @@ progress::-webkit-progress-value { background: #7662f2; border-radius: 99px; }
 progress::-moz-progress-bar { background: #7662f2; border-radius: 99px; }
 .account-controls { display: flex; align-items: center; gap: .45rem; }
 .account-menu { position: relative; }
-.account-menu summary { width: 44px; padding: 0; display: grid; place-items: center; list-style: none; letter-spacing: .08em; }
-.account-menu summary::-webkit-details-marker { display: none; }
-.account-menu-panel { position: absolute; z-index: 4; top: calc(100% + .4rem); right: 0; width: 13rem; display: grid; gap: .3rem; padding: .45rem; border: 1px solid #30323a; border-radius: .75rem; background: #111217; box-shadow: 0 16px 38px rgba(0,0,0,.38); }
-.toggle-label { display: flex; align-items: center; gap: .6rem; min-height: 44px; padding: .4rem .55rem; color: #d5d6db; font-size: .82rem; }
-.toggle-label input, .confirm-label input { width: 1.1rem; height: 1.1rem; accent-color: #7b69f1; }
-.menu-action { width: 100%; border-color: transparent; text-align: left; font-size: .82rem; font-weight: 550; }
+.account-menu-trigger { width: 2.25rem; height: 2.25rem; padding: 0; display: grid; place-items: center; list-style: none; }
+.account-menu-trigger::-webkit-details-marker { display: none; }
+.account-menu-panel { position: absolute; z-index: 4; top: calc(100% + .4rem); right: 0; width: 13rem; display: grid; gap: .18rem; padding: .35rem; border: 1px solid #30323a; border-radius: .75rem; background: #111217; box-shadow: 0 16px 38px rgba(0,0,0,.38); opacity: 0; visibility: hidden; transform: translateY(-.3rem) scale(.98); transform-origin: top right; transition: opacity 150ms ease, transform 150ms ease, visibility 0s linear 150ms; }
+.account-menu-panel { overflow: visible; }
+.account-menu[open] .account-menu-panel { opacity: 1; visibility: visible; transform: translateY(0) scale(1); transition-delay: 0s; }
+.menu-action { width: 100%; min-height: 2.25rem; display: flex; align-items: center; gap: .6rem; border-color: transparent; text-align: left; font-size: .8rem; font-weight: 600; }
+.menu-action.is-busy .action-icon { animation: action-spin .8s linear infinite; }
 .danger { color: #f29a93; }
+.danger-button { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; border-color: #74403e; background: #331817; color: #ffb0a9; }
+.danger-button:hover { border-color: #a85c56; background: #48201e; }
+.dialog-kicker { display: block; margin-bottom: .25rem; color: #858894; font-size: .68rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: .55rem; margin-top: 1.35rem; }
+.confirm-dialog { width: min(calc(100% - 2rem), 28rem); }
+.confirm-dialog p { margin-top: 0; font-size: .86rem; }
+@keyframes account-row-in { from { opacity: 0; transform: translateY(.3rem); } to { opacity: 1; transform: translateY(0); } }
+@keyframes action-spin { to { transform: rotate(360deg); } }
 .empty { margin: 0; padding: 2.75rem 1rem; border-block: 1px solid #25272e; text-align: center; }
 .empty strong { display: block; color: #e7e7ea; font-size: .95rem; }
 .empty span { display: block; margin-top: .35rem; color: #858894; font-size: .82rem; }
@@ -162,6 +174,6 @@ code { user-select: all; color: #b9afff; }
 @media (forced-colors: active) {
   body, .dialog { background: Canvas; }
   .topbar, .accounts, .account-row, .toast, .settings-section, .dialog, .account-menu-panel { border-color: CanvasText; box-shadow: none; }
-  .primary, .quiet, .menu-action, .icon-button, .account-menu summary { background: ButtonFace; color: ButtonText; }
+  .primary, .quiet, .menu-action, .icon-button, .danger-button, .account-menu-trigger { background: ButtonFace; color: ButtonText; }
   .health::before { background: CanvasText; }
 }

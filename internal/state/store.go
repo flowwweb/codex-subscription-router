@@ -213,7 +213,7 @@ func (s *Store) AddAccountIdempotent(label, key string) (Account, bool, error) {
 
 	label = strings.TrimSpace(label)
 	if label == "" {
-		label = fmt.Sprintf("Subscription %d", len(s.accounts)+1)
+		label = "OpenAI account"
 	}
 	id, err := randomID()
 	if err != nil {

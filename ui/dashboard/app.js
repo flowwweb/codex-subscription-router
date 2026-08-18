@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const state = { csrf: '', accounts: [], pending: new Map(), events: null, addKey: '', migrationReview: null, migrationInFlight: false, activeLoginAccountId: '', loginWindow: null, loginWindowName: '' };
+  const state = { csrf: '', accounts: [], pending: new Map(), events: null, addKey: '', migrationReview: null, migrationInFlight: false, activeLoginAccountId: '', loginWindow: null, loginWindowName: '', removeRequest: null };
   const $ = (selector) => document.querySelector(selector);
   const title = $('#status-title');
   const detail = $('#status-detail');
@@ -9,6 +9,7 @@
   const settingsToastRegion = $('#settings-toast-region');
   const accountsNode = $('#accounts');
   const loginDialog = $('#login-dialog');
+  const removeDialog = $('#remove-account-dialog');
   const settingsDialog = $('#settings-dialog');
 
   function requestKey() {
@@ -94,15 +95,26 @@
   }
 
   function accountStatus(account) {
-    if (!account.connected) return { label: account.error ? 'Unavailable' : 'Needs sign-in', className: 'warning' };
-    if (!account.enabled) return { label: 'Paused', className: '' };
-    if (account.error) return { label: 'Unavailable', className: 'warning' };
-    if (!hasCapacity(account)) return { label: 'Depleted', className: 'warning' };
-    return { label: 'Ready', className: 'ready' };
+    if (!account.connected) return { label: account.error ? 'Unavailable' : 'Needs sign-in', className: 'warning', icon: 'warning' };
+    if (!account.enabled) return { label: 'Paused', className: '', icon: 'pause' };
+    if (account.error) return { label: 'Unavailable', className: 'warning', icon: 'warning' };
+    if (!hasCapacity(account)) return { label: 'Depleted', className: 'warning', icon: 'warning' };
+    return { label: 'Ready', className: 'ready', icon: 'check' };
   }
 
   function isPlaceholderAccount(account) {
-    return !account.connected && !account.email && !account.error && /^Account \d+$/.test(account.label || '');
+    const label = String(account.label || '').trim();
+    return !account.connected && !account.email && !account.error && (!label || label === 'OpenAI account' || /^(?:Imported )?(?:OpenAI )?(?:account|subscription) \d+$/i.test(label));
+  }
+
+  function accountDisplayName(account) {
+    const label = String(account.label || '').trim();
+    const generatedLabel = /^(?:Imported )?(?:OpenAI )?(?:account|subscription) \d+$/i.test(label);
+    return account.email || (label && !generatedLabel ? label : '') || 'OpenAI account';
+  }
+
+  function closeAccountMenus() {
+    document.querySelectorAll('.account-menu[open]').forEach((menu) => menu.removeAttribute('open'));
   }
 
   function renderSummary() {
@@ -170,7 +182,7 @@
 
   function render() {
     const activeCard = document.activeElement?.closest?.('[data-account-id]');
-    const activeControl = ['enabled', 'rename', 'login', 'remove'].find((name) => document.activeElement?.classList?.contains(name));
+    const activeControl = ['refresh-account', 'toggle-account', 'rename', 'login', 'remove'].find((name) => document.activeElement?.classList?.contains(name));
     accountsNode.replaceChildren();
     accountsNode.setAttribute('aria-busy', 'false');
     renderSummary();
@@ -183,8 +195,8 @@
     for (const account of state.accounts) {
       const fragment = $('#account-template').content.cloneNode(true);
       const card = fragment.querySelector('.account-row'); card.dataset.accountId = account.id;
-      const customLabel = account.label && !/^Account \d+$/.test(account.label) ? account.label : '';
-      fragment.querySelector('.account-name').textContent = account.email || customLabel || 'OpenAI account';
+      const displayName = accountDisplayName(account);
+      fragment.querySelector('.account-name').textContent = displayName;
       const plan = fragment.querySelector('.account-plan');
       plan.textContent = account.planLabel || '';
       plan.hidden = !account.planLabel;
@@ -192,23 +204,30 @@
         ? (!account.enabled ? 'Routing paused' : (account.controller ? 'Primary account' : 'Ready to route'))
         : (account.error || 'Not connected');
       const status = accountStatus(account);
-      const statusNode = fragment.querySelector('.account-state'); statusNode.textContent = status.label; if (status.className) statusNode.classList.add(status.className);
+      const statusNode = fragment.querySelector('.account-state');
+      statusNode.className = `account-state${status.className ? ` ${status.className}` : ''}`;
+      statusNode.querySelector('.state-label').textContent = status.label;
+      statusNode.querySelectorAll('[data-state-icon]').forEach((icon) => { icon.hidden = icon.dataset.stateIcon !== status.icon; });
       appendUsage(fragment.querySelector('.usage'), account);
-      const enabled = fragment.querySelector('.enabled');
-      enabled.checked = Boolean(account.enabled);
-      enabled.setAttribute('aria-label', `Use ${account.email || customLabel || 'this account'} for routing`);
-      fragment.querySelector('.enabled-text').textContent = enabled.checked ? 'Use this account' : 'Account paused';
-      enabled.addEventListener('change', () => updateAccount(account.id, { enabled: enabled.checked }));
-      fragment.querySelector('.rename').addEventListener('click', () => renameAccount(account));
+      const refresh = fragment.querySelector('.refresh-account');
+      refresh.setAttribute('aria-label', `Refresh usage for ${displayName}`);
+      refresh.addEventListener('click', refreshAccount);
+      const toggle = fragment.querySelector('.toggle-account');
+      const toggleMode = account.enabled ? 'pause' : 'play';
+      toggle.setAttribute('aria-label', `${account.enabled ? 'Pause' : 'Resume'} routing for ${displayName}`);
+      toggle.querySelector('.toggle-copy').textContent = account.enabled ? 'Pause routing' : 'Resume routing';
+      toggle.querySelectorAll('[data-toggle-icon]').forEach((icon) => { icon.hidden = icon.dataset.toggleIcon !== toggleMode; });
+      toggle.addEventListener('click', () => { closeAccountMenus(); updateAccount(account.id, { enabled: !account.enabled }); });
+      fragment.querySelector('.rename').addEventListener('click', () => { closeAccountMenus(); renameAccount(account); });
       const login = fragment.querySelector('.login');
       const needsRepair = Boolean(account.error);
       login.hidden = account.connected && !needsRepair;
-      login.textContent = state.pending.has(account.id) ? 'Signing in…' : (needsRepair ? 'Repair' : 'Connect');
+      login.querySelector('.login-label').textContent = state.pending.has(account.id) ? 'Signing in…' : (needsRepair ? 'Repair' : 'Connect');
       login.disabled = state.pending.size > 0;
       login.addEventListener('click', () => connectAccount(account.id, openLoginWindow()));
       const remove = fragment.querySelector('.remove');
       remove.hidden = account.controller;
-      remove.addEventListener('click', () => removeAccount(account));
+      remove.addEventListener('click', (event) => openRemoveDialog(account, event.currentTarget));
       accountsNode.append(fragment);
     }
     if (activeCard && activeControl) {
@@ -228,6 +247,21 @@
     catch (error) { announce(requestFailureMessage(error, 'This account could not be updated. Try again.'), true); return; }
     try { await loadAccounts(); }
     catch (_) { render(); announce('Account updated. The account list could not refresh; reopen FLOW.', true); }
+  }
+
+  async function refreshAccount(event) {
+    const button = event?.currentTarget;
+    closeAccountMenus();
+    button?.classList.add('is-busy');
+    button?.setAttribute('aria-busy', 'true');
+    if (button) button.disabled = true;
+    try {
+      await loadAccounts();
+      announce('Usage refreshed.');
+    } catch (_) {
+      render();
+      announce('Usage could not be refreshed. Try again.', true);
+    }
   }
 
   function renameAccount(account) {
@@ -429,20 +463,42 @@
     } catch (error) { announce(requestFailureMessage(error, 'Sign-in could not be cancelled. Try again.'), true); }
   }
 
-  async function removeAccount(account) {
-    if (!window.confirm(`Remove ${account.label || 'this account'}? Its local account home will be archived.`)) return;
+  function openRemoveDialog(account, trigger) {
+    closeAccountMenus();
+    state.removeRequest = { account, trigger };
+    $('#remove-account-copy').textContent = `Remove ${accountDisplayName(account)}? Its local account home will be archived for recovery.`;
+    removeDialog.showModal();
+    removeDialog.focus();
+  }
+
+  function closeRemoveDialog(restoreFocus = true) {
+    const trigger = state.removeRequest?.trigger;
+    state.removeRequest = null;
+    if (removeDialog.open) removeDialog.close();
+    if (restoreFocus && trigger?.isConnected) trigger.focus();
+  }
+
+  async function confirmRemoveAccount() {
+    const request = state.removeRequest;
+    if (!request) return;
+    const { account, trigger } = request;
+    closeRemoveDialog(false);
     try {
       await api(`/v1/accounts/${encodeURIComponent(account.id)}`, { method: 'DELETE' });
       announce('Account removed. Its local data was archived for recovery.');
       try { await loadAccounts(); }
       catch (_) { render(); announce('Account removed. The account list could not refresh; reopen FLOW.', true); }
-    } catch (error) { announce(requestFailureMessage(error, 'This account could not be removed. Try again.'), true); }
+    } catch (error) {
+      render();
+      if (trigger?.isConnected) trigger.focus();
+      announce(requestFailureMessage(error, 'This account could not be removed. Try again.'), true);
+    }
   }
 
   async function addOrConnect(popup = null) {
     try {
       state.addKey ||= requestKey();
-      const result = await api('/v1/accounts', { method: 'POST', body: JSON.stringify({ label: `Account ${state.accounts.length + 1}`, idempotencyKey: state.addKey }) });
+      const result = await api('/v1/accounts', { method: 'POST', body: JSON.stringify({ label: 'OpenAI account', idempotencyKey: state.addKey }) });
       let reconciled = false;
       try { await loadAccounts(); reconciled = true; }
       catch (_) { render(); }
@@ -500,7 +556,7 @@
     const batchKey = requestKey(); const items = [];
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index]; const parsed = canonicalExport(JSON.parse(await file.text())); const target = disconnected[index];
-      items.push({ ...parsed, file, targetId: target?.id || '', targetLabel: target?.label || `Imported account ${index + 1}`, createKey: `codex-lb-${batchKey}-${index}` });
+      items.push({ ...parsed, file, targetId: target?.id || '', targetLabel: target?.label || 'Imported OpenAI account', createKey: `codex-lb-${batchKey}-${index}` });
     }
     return { signature: migrationSignature(files), items };
   }
@@ -569,10 +625,15 @@
   }
 
   document.querySelectorAll('[data-connect]').forEach((button) => button.addEventListener('click', () => addOrConnect(openLoginWindow())));
+  document.addEventListener('click', (event) => { if (!event.target.closest('.account-menu')) closeAccountMenus(); });
   $('#open-settings').addEventListener('click', () => { settingsDialog.showModal(); settingsDialog.focus(); });
   $('#close-settings').addEventListener('click', () => settingsDialog.close());
   $('#cancel-login').addEventListener('click', cancelActiveLogin);
   loginDialog.addEventListener('cancel', (event) => { event.preventDefault(); cancelActiveLogin(); });
+  $('#close-remove-account').addEventListener('click', () => closeRemoveDialog());
+  $('#cancel-remove-account').addEventListener('click', () => closeRemoveDialog());
+  $('#confirm-remove-account').addEventListener('click', confirmRemoveAccount);
+  removeDialog.addEventListener('cancel', (event) => { event.preventDefault(); closeRemoveDialog(); });
   $('#migrate-codex-lb').addEventListener('click', migrateCodexLB);
   $('#codex-lb-files').addEventListener('change', () => {
     state.migrationReview = null; $('#migration-preview').hidden = true; $('#migrate-codex-lb').textContent = 'Review import'; announce('', false, true);

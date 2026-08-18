@@ -378,7 +378,7 @@ function CodexMuxAccountMenu() {
       );
       const account = reusable || (await codexMuxRequest("/accounts", {
         method: "POST",
-        body: JSON.stringify({ label: `Subscription ${connected.length + 1}` }),
+        body: JSON.stringify({ label: "OpenAI account" }),
       })).account;
       const result = await codexMuxRequest(`/accounts/${account.id}/login`, {
         method: "POST",
