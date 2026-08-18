@@ -36,6 +36,17 @@ $first = Assert-ExactRuntime
 if ((Get-FileHash -LiteralPath $config.muxExecutable -Algorithm SHA256).Hash -ne [string]$config.muxSha256) { throw "Mux hash mismatch." }
 if ((Get-FileHash -LiteralPath $config.codexBackendExecutable -Algorithm SHA256).Hash -ne [string]$config.codexBackendSha256) { throw "Backend hash mismatch." }
 
+foreach ($privateRoot in @([string]$config.routerAppRoot, [string]$config.routerAppUserData)) {
+    if ([string]::IsNullOrWhiteSpace($privateRoot) -or -not (Test-Path -LiteralPath $privateRoot -PathType Container)) {
+        throw "FLOW private root is missing: $privateRoot"
+    }
+    $privateAcl = Get-Acl -LiteralPath $privateRoot
+    if (-not $privateAcl.AreAccessRulesProtected) { throw "FLOW private root DACL is not protected: $privateRoot" }
+    $privateAllowed = @([System.Security.Principal.WindowsIdentity]::GetCurrent().Name, "NT AUTHORITY\SYSTEM")
+    $privateUnexpected = @($privateAcl.Access | Where-Object { $_.IdentityReference.Value -notin $privateAllowed -or $_.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow })
+    if ($privateUnexpected.Count -gt 0) { throw "FLOW private root grants an unexpected principal: $privateRoot" }
+}
+
 $task = Get-ScheduledTask -TaskName "Codex Subscription Router"
 if ($task.Settings.DisallowStartIfOnBatteries -or $task.Settings.StopIfGoingOnBatteries) { throw "Scheduled task is not battery-safe." }
 

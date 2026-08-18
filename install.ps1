@@ -339,6 +339,7 @@ $config = [ordered]@{
     dashboardScript = $dashboardScript
     connectScript = $connectScript
     routerAppExecutable = $routerAppExecutable
+    routerAppRoot = $routerAppRoot
     routerAppAsarSha256 = $routerAppAsarHash
     routerAppUserData = $routerAppUserData
     routerAppLauncher = $routerAppLauncher
@@ -386,6 +387,8 @@ try {
     Fail "router configuration could not be published without risking the previous file: $($_.Exception.Message)"
 }
 Set-PrivateStateAcl $stateRoot
+Set-PrivateStateAcl $routerAppRoot
+Set-PrivateStateAcl $routerAppUserData
 if ($primaryRequiresAclMigration) {
     Set-PrivateStateAcl $primaryCodexHome
     "Private ACL migration completed by installer v2." | Set-Content -LiteralPath $primaryAclMarker -Encoding UTF8
@@ -415,6 +418,7 @@ $stateReceipt = [ordered]@{
     connectScript = $connectScript
     connectLauncher = $connectScript
     routerAppExecutable = $routerAppExecutable
+    routerAppRoot = $routerAppRoot
     routerAppLauncher = $routerAppLauncher
     nativeAccountMenu = "Add account"
 }
@@ -474,7 +478,7 @@ if (-not $NoLaunch) {
     New-ItemProperty -Path $protocolRoot -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
     $protocolCommandKey = Join-Path $protocolRoot "shell\open\command"
     New-Item -Path $protocolCommandKey -Force | Out-Null
-    $protocolCommand = '"{0}" -NoProfile -ExecutionPolicy Bypass -File "{1}"' -f (Join-Path $PSHOME "powershell.exe"), $protocolScript
+    $protocolCommand = '"{0}" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{1}"' -f (Join-Path $PSHOME "powershell.exe"), $protocolScript
     Set-Item -Path $protocolCommandKey -Value $protocolCommand
 
     $iconSource = Join-Path $sourceRoot "plugins\codex-router\assets\flowwweb-icon.ico"

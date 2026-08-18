@@ -248,6 +248,7 @@ func runConnectAccount(args []string) error {
 	encoder := json.NewEncoder(taskCommandOutput)
 	if err := encoder.Encode(map[string]any{
 		"event": "sign_in_required", "account": started.Account.Label,
+		"accountId": started.Account.ID, "attemptId": started.Attempt.ID,
 		"userCode": started.Login.UserCode, "verificationUrl": started.Login.VerificationURL,
 		"expiresAt": started.Attempt.ExpiresAt,
 	}); err != nil {

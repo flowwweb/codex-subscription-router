@@ -38,19 +38,25 @@
     return payload;
   }
 
-  function bootstrapNonce() {
+  function bootstrapData() {
     const params = new URLSearchParams(location.hash.slice(1));
-    const nonce = params.get('bootstrap') || '';
+    const data = {
+      nonce: params.get('bootstrap') || '',
+      connectAccount: params.get('connectAccount') || '',
+      connectAttempt: params.get('connectAttempt') || '',
+      connectUrl: params.get('connectUrl') || '',
+    };
     history.replaceState(null, '', location.pathname);
-    return nonce;
+    return data;
   }
 
   async function establishSession() {
-    const nonce = bootstrapNonce();
-    const result = nonce
-      ? await api('/v1/session/bootstrap', { method: 'POST', body: JSON.stringify({ nonce }) })
+    const bootstrap = bootstrapData();
+    const result = bootstrap.nonce
+      ? await api('/v1/session/bootstrap', { method: 'POST', body: JSON.stringify({ nonce: bootstrap.nonce }) })
       : await api('/v1/session');
     state.csrf = result.csrfToken;
+    return bootstrap;
   }
 
   function setHealth(label, className) {
@@ -363,6 +369,23 @@
     }
   }
 
+  function resumeLogin(bootstrap) {
+    if (!bootstrap?.connectAccount || !bootstrap.connectAttempt || !bootstrap.connectUrl) return;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(bootstrap.connectAccount) || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(bootstrap.connectAttempt)) {
+      announce('This sign-in could not be resumed. Choose Connect again.', true);
+      return;
+    }
+    const uri = codexMuxTrustedBrowserLoginURL(bootstrap.connectUrl);
+    if (!uri) {
+      announce('OpenAI sign-in could not be resumed safely. Choose Connect again.', true);
+      return;
+    }
+    state.pending.set(bootstrap.connectAccount, { id: bootstrap.connectAttempt, key: '' });
+    render();
+    showLogin(bootstrap.connectAccount, uri, null);
+    watchLogin(bootstrap.connectAccount, bootstrap.connectAttempt);
+  }
+
   function migrationSignature(files) { return files.map((file) => `${file.name}:${file.size}:${file.lastModified}`).join('|'); }
 
   function canonicalExport(exported) {
@@ -442,19 +465,18 @@
 
   async function start() {
     try {
-      await establishSession();
+      const bootstrap = await establishSession();
       const result = await api('/v1/health');
       $('#technical-build').textContent = result.technical?.build || 'Unavailable';
       $('#technical-state').textContent = result.technical?.stateRoot || 'Unavailable';
       $('#technical-primary').textContent = result.technical?.primaryCodexHome || 'Unavailable';
-      await loadAccounts(); subscribe();
+      await loadAccounts(); subscribe(); resumeLogin(bootstrap);
     } catch (error) { setOffline(error); }
   }
 
   document.querySelectorAll('[data-connect]').forEach((button) => button.addEventListener('click', () => addOrConnect(openLoginWindow())));
   $('#open-settings').addEventListener('click', () => { settingsDialog.showModal(); settingsDialog.focus(); });
   $('#close-settings').addEventListener('click', () => settingsDialog.close());
-  $('#close-login').addEventListener('click', cancelActiveLogin);
   $('#cancel-login').addEventListener('click', cancelActiveLogin);
   loginDialog.addEventListener('cancel', (event) => { event.preventDefault(); cancelActiveLogin(); });
   $('#migrate-codex-lb').addEventListener('click', migrateCodexLB);

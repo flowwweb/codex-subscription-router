@@ -24,6 +24,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 		"flowwweb-icon.png",
 		"settings-dialog",
 		"login-dialog",
+		"Cancel sign-in",
 	} {
 		if !strings.Contains(html, text) {
 			t.Errorf("index is missing %q", text)
@@ -47,7 +48,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("accessible dashboard styling is missing %q", contract)
 		}
 	}
-	for _, contract := range []string{"history.replaceState", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for approval", "Account connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this import", "Opening OpenAI", "Repair", "const needsRepair = Boolean(account.error)", "login.hidden = account.connected && !needsRepair", "codexMuxTrustedBrowserLoginURL", "getAll('redirect_uri')", "'/oauth/authorize'", "'/auth/callback'", "response_type", "code_challenge_method", "login?.verificationUrl", "window.open('', 'flow-openai-connect'", "popup.location.replace(uri)", "state.loginWindow.close()", "notice.focus()", "Ready to route", "No usage available", "hasCapacity", "% left", "showModal()"} {
+	for _, contract := range []string{"history.replaceState", "connectAttempt", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for approval", "Account connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this import", "Opening OpenAI", "Repair", "const needsRepair = Boolean(account.error)", "login.hidden = account.connected && !needsRepair", "codexMuxTrustedBrowserLoginURL", "getAll('redirect_uri')", "'/oauth/authorize'", "'/auth/callback'", "response_type", "code_challenge_method", "login?.verificationUrl", "window.open('', 'flow-openai-connect'", "popup.location.replace(uri)", "state.loginWindow.close()", "notice.focus()", "Ready to route", "No usage available", "hasCapacity", "% left", "showModal()"} {
 		if !strings.Contains(js, contract) {
 			t.Errorf("JavaScript is missing %q", contract)
 		}

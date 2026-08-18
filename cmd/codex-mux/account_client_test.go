@@ -333,7 +333,7 @@ func TestConnectCommandsPreserveIntentAndEmitSafeEvents(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := output.String()
-			if !strings.Contains(got, `"event":"sign_in_required"`) || strings.Contains(got, "private executable path") {
+			if !strings.Contains(got, `"event":"sign_in_required"`) || !strings.Contains(got, `"accountId":"primary"`) || !strings.Contains(got, `"attemptId":"attempt-1"`) || strings.Contains(got, "private executable path") {
 				t.Fatalf("unsafe or incomplete connect output: %s", got)
 			}
 			if test.openFails && !strings.Contains(got, `"event":"browser_open_failed"`) {

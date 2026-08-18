@@ -43,6 +43,9 @@ if ($verifyScript -notmatch [regex]::Escape('CommandLine -match ''^\s*(?:"[^"]*c
 if ($verifyScript -notmatch [regex]::Escape("Rerun install.ps1 to repair startup")) {
     throw "Installed verifier daemon-count failure is not actionable"
 }
+if ($verifyScript -notmatch [regex]::Escape('$config.routerAppRoot') -or $verifyScript -notmatch [regex]::Escape("FLOW private root DACL")) {
+    throw "Installed verifier does not protect the copied FLOW app tree"
+}
 $daemonPattern = '^\s*(?:"[^"]*codex-mux\.exe"|\S*codex-mux\.exe)\s+daemon(?:\s|$)'
 foreach ($case in @(
     @{ Command = '"C:\Router\codex-mux.exe" daemon --control-port 0'; Expected = $true },
@@ -82,6 +85,7 @@ foreach ($required in @(
     "connect-account"
     "patch-codex-app.mjs"
     "routerAppExecutable"
+    "routerAppRoot"
     "routerAppAsarSha256"
     "CODEX_ELECTRON_USER_DATA_PATH"
     "--user-data-dir="
@@ -90,6 +94,8 @@ foreach ($required in @(
     "flowwweb-icon.ico"
     "--new-account"
     "--account-id"
+    "connectAttempt"
+    "Set-PrivateStateAcl $routerAppRoot"
 )) {
     if ($contracts -notmatch [regex]::Escape($required)) {
         throw "Windows installer is missing required contract: $required"
@@ -106,6 +112,9 @@ foreach ($required in @("APPROVED_ASAR_SHA256", "WindowsApps", "native profile-m
 $protocol = Get-Content -LiteralPath (Join-Path $root "scripts\windows\codex-router-protocol.ps1") -Raw
 if ($protocol -notmatch [regex]::Escape('$Ignored') -or $protocol -match 'Invoke-Expression|Start-Process.*\$Ignored') {
     throw "Router protocol handler must discard every untrusted URL argument"
+}
+if ($protocol -notmatch [regex]::Escape('-NoOpen -NoWait') -or $protocol -notmatch [regex]::Escape('-ConnectAttempt') -or $protocol -notmatch [regex]::Escape('Start-Process ([string]$event.verificationUrl)')) {
+    throw "Router protocol handler must hand off the pending attempt to FLOW before opening OpenAI"
 }
 
 foreach ($required in @(

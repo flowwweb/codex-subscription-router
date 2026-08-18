@@ -6,7 +6,7 @@ $installRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) { Split-Path -Par
 $configPath = Join-Path $installRoot "router-config.json"
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw "Router configuration is missing; rerun install.ps1." }
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-foreach ($required in @("routerAppExecutable", "routerAppAsarSha256", "routerAppUserData", "stateRoot", "primaryCodexHome")) {
+foreach ($required in @("routerAppExecutable", "routerAppRoot", "routerAppAsarSha256", "routerAppUserData", "stateRoot", "primaryCodexHome")) {
     if ([string]::IsNullOrWhiteSpace([string]$config.$required)) { throw "Router app configuration is missing '$required'; rerun install.ps1." }
 }
 $asarPath = Join-Path (Split-Path -Parent $config.routerAppExecutable) "resources\app.asar"
