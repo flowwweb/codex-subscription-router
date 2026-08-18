@@ -33,6 +33,10 @@ $installer = Get-Content -LiteralPath (Join-Path $root "install.ps1") -Raw
 $launcherScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\launch-router.ps1") -Raw
 $startScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\start-router.ps1") -Raw
 $dashboardScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\open-dashboard.ps1") -Raw
+$verifyScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\verify-installed-router.ps1") -Raw
+if ($verifyScript -notmatch "CommandLine -match '\(\?:\^\|\\s\)daemon") {
+    throw "Installed verifier does not distinguish the daemon from account connection helpers"
+}
 $connectScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\connect-account.ps1") -Raw
 $accountClient = Get-Content -LiteralPath (Join-Path $root "cmd\codex-mux\account_client.go") -Raw
 $routerSkill = Get-Content -LiteralPath (Join-Path $root "plugins\codex-router\skills\codex-router\SKILL.md") -Raw

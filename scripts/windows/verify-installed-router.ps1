@@ -74,8 +74,11 @@ if ($ExerciseCrashRecovery) {
 Start-ScheduledTask -TaskName "Codex Subscription Router"
 Start-Sleep -Seconds 2
 $final = Assert-ExactRuntime
-$muxProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'codex-mux.exe'")
-if ($muxProcesses.Count -ne 1) { throw "Scheduled start left $($muxProcesses.Count) mux processes." }
+$muxProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'codex-mux.exe'" | Where-Object {
+    [string]$_.ExecutablePath -eq [string]$config.muxExecutable -and
+    [string]$_.CommandLine -match '(?:^|\s)daemon(?:\s|$)'
+})
+if ($muxProcesses.Count -ne 1) { throw "Scheduled start left $($muxProcesses.Count) installed router daemons." }
 
 [pscustomobject]@{
     verified = $true

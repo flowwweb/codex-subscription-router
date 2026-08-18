@@ -229,11 +229,11 @@ request Automation access the first time Computer Use controls another app.
 
 ### Windows
 
-The installer opens the local dashboard automatically. Select **Connect
-subscription**, complete the ChatGPT browser sign-in, then add the next
-subscription. Existing codex-lb users can expand **Use subscriptions already
-connected in codex-lb**, export each account as Codex auth JSON, pause codex-lb
-routing for those accounts, and import all exports together. This is a one-time
+The installer opens the local dashboard automatically. Select **Add account**,
+complete the ChatGPT browser sign-in, then add the next account. Existing
+codex-lb users can open **Settings → Import from codex-lb**, export each account
+as Codex auth JSON, pause codex-lb routing for those accounts, and import all
+exports together. This is a one-time
 migration, not live synchronization: only one product may own refresh for the
 copied credentials.
 
