@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const state = { csrf: '', accounts: [], pending: new Map(), events: null, addKey: '', migrationReview: null, migrationInFlight: false, activeLoginAccountId: '', loginWindow: null };
+  const state = { csrf: '', accounts: [], pending: new Map(), events: null, addKey: '', migrationReview: null, migrationInFlight: false, activeLoginAccountId: '', loginWindow: null, loginWindowName: '' };
   const $ = (selector) => document.querySelector(selector);
   const title = $('#status-title');
   const detail = $('#status-detail');
@@ -253,7 +253,8 @@
   }
 
   function openLoginWindow() {
-    const popup = window.open('', 'flow-openai-connect', 'popup,width=560,height=760');
+    state.loginWindowName = `flow-openai-connect-${requestKey()}`;
+    const popup = window.open('', state.loginWindowName, 'popup,width=560,height=760');
     if (popup) {
       const document = popup.document;
       document.title = 'FLOW';
@@ -287,6 +288,7 @@
     const link = $('#login-link');
     link.hidden = !uri;
     if (!link.hidden) link.href = uri;
+    link.target = state.loginWindowName || '_blank';
     $('#login-status').textContent = 'Waiting for approval…';
     if (!loginDialog.open) loginDialog.showModal();
     loginDialog.focus();
@@ -296,6 +298,7 @@
   function closeLoginDialog(closePopup = false) {
     if (closePopup && state.loginWindow && !state.loginWindow.closed) state.loginWindow.close();
     state.loginWindow = null;
+    state.loginWindowName = '';
     state.activeLoginAccountId = '';
     if (loginDialog.open) loginDialog.close();
     window.focus();
