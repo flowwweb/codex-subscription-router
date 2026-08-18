@@ -25,10 +25,10 @@ a { color: #b8adff; }
 .brand { display: grid; gap: .08rem; min-width: 0; }
 .brand-mark { width: 1.55rem; height: 1.55rem; display: block; image-rendering: auto; }
 .brand-lockup { display: flex; align-items: center; gap: .55rem; min-width: 0; }
-.brand-wordmark { width: 9.25rem; height: auto; display: block; object-fit: contain; image-rendering: auto; }
+.brand-wordmark { width: 7.5rem; height: auto; display: block; object-fit: contain; image-rendering: auto; }
 .brand-copy { display: block; min-width: 0; text-align: center; line-height: 1; }
 .brand-copy strong { font-size: .9rem; font-weight: 760; letter-spacing: .08em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.brand-copy small { color: #858894; font-size: .64rem; font-weight: 600; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-copy small { color: #858894; font-size: .72rem; font-weight: 650; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .top-actions { display: flex; align-items: center; gap: .55rem; flex: 0 0 auto; position: relative; z-index: 1; }
 .icon-only { width: 44px; padding: 0; display: grid; place-items: center; position: relative; z-index: 2; }
 .icon-only svg { width: 1.15rem; height: 1.15rem; }
