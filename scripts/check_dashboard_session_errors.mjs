@@ -84,6 +84,6 @@ vm.runInContext(`${helper}; ${extractFunction("migrationSignature")}; ${extractF
 await migrationContext.run();
 assert.equal(migrationState.migrationInFlight, false);
 assert.equal(migrationButton.disabled, false);
-assert.deepEqual(notices.pop(), [expired, true, true]);
+assert.deepEqual(notices.pop(), [expired, true]);
 
 console.log("Dashboard session expiry contracts passed");

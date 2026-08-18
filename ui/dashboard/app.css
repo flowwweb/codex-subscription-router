@@ -61,6 +61,7 @@ p { margin: .45rem 0 0; color: #9699a5; line-height: 1.5; }
 .account-row { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(17rem, 1.25fr) auto; align-items: center; gap: 1.4rem; min-height: 8rem; padding: 1.15rem 0; border-bottom: 1px solid #25272e; }
 .account-identity-block { min-width: 0; }
 .account-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.account-plan { color: #a99df1; font-size: .68rem; font-weight: 650; letter-spacing: .03em; }
 .account-identity { margin-top: .25rem; font-size: .78rem; }
 .account-state { border-radius: 999px; background: #17191e; color: #aaaeba; padding: .2rem .45rem; font-size: .68rem; font-weight: 700; }
 .account-state.ready { color: #76dca5; }
@@ -86,7 +87,13 @@ progress::-moz-progress-bar { background: #7662f2; border-radius: 99px; }
 .empty { margin: 0; padding: 2.75rem 1rem; border-block: 1px solid #25272e; text-align: center; }
 .empty strong { display: block; color: #e7e7ea; font-size: .95rem; }
 .empty span { display: block; margin-top: .35rem; color: #858894; font-size: .82rem; }
-.notice { margin: 0 0 1.5rem; border: 1px solid #55452d; background: #17140e; color: #f0c57d; padding: .8rem .9rem; border-radius: .65rem; font-size: .85rem; }
+.toast-region { position: fixed; z-index: 20; top: 1rem; right: 1rem; width: min(22rem, calc(100vw - 2rem)); display: grid; gap: .5rem; pointer-events: none; }
+.toast { display: flex; align-items: flex-start; gap: .65rem; border: 1px solid #31343d; border-radius: .8rem; background: rgba(20,21,27,.96); color: #e9e9ee; padding: .75rem .85rem; box-shadow: 0 14px 35px rgba(0,0,0,.32); font-size: .83rem; line-height: 1.35; pointer-events: auto; animation: toast-in .18s ease-out; }
+.toast.success { border-color: #345d4e; }
+.toast.error { border-color: #74403e; }
+.toast-icon { flex: 0 0 auto; width: 1.25rem; height: 1.25rem; display: grid; place-items: center; border-radius: 999px; background: #3e8069; color: #07110d; font-size: .78rem; font-weight: 800; line-height: 1; }
+.toast.error .toast-icon { background: #b85b55; color: #1b0807; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-.35rem); } to { opacity: 1; transform: translateY(0); } }
 .dialog { width: min(calc(100% - 2rem), 32rem); max-height: min(46rem, calc(100vh - 2rem)); overflow: auto; border: 1px solid #30323a; border-radius: 1rem; background: #0f1014; color: #f5f5f7; padding: 1.25rem; box-shadow: 0 24px 80px rgba(0,0,0,.6); }
 .dialog:focus { outline: none; }
 .dialog::backdrop { background: rgba(3,4,7,.72); backdrop-filter: blur(5px); }
@@ -94,6 +101,7 @@ progress::-moz-progress-bar { background: #7662f2; border-radius: 99px; }
 .icon-button { flex: 0 0 auto; width: 44px; padding: 0; font-size: 1.4rem; font-weight: 400; }
 .action-link { min-height: 48px; display: flex; align-items: center; justify-content: center; text-decoration: none; }
 .connection-status { min-height: 3.5rem; margin: 1rem 0; display: flex; align-items: center; justify-content: center; gap: .65rem; color: #c9cad0; font-size: .85rem; }
+.login-opening { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8rem; color: #d9dae0; font-size: .9rem; }
 .spinner { width: 1rem; height: 1rem; border: 2px solid #403b63; border-top-color: #9a88ff; border-radius: 50%; animation: spin .8s linear infinite; }
 .text-action { border: 0; background: transparent; color: #858894; padding: .7rem; }
 .text-action:hover { color: #d5d6dc; }
@@ -139,7 +147,7 @@ code { user-select: all; color: #b9afff; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
 @media (forced-colors: active) {
   body, .dialog { background: Canvas; }
-  .topbar, .accounts, .account-row, .notice, .settings-section, .dialog, .account-menu-panel { border-color: CanvasText; box-shadow: none; }
+  .topbar, .accounts, .account-row, .toast, .settings-section, .dialog, .account-menu-panel { border-color: CanvasText; box-shadow: none; }
   .primary, .quiet, .menu-action, .icon-button, .account-menu summary { background: ButtonFace; color: ButtonText; }
   .health::before { background: CanvasText; }
 }

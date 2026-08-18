@@ -5,8 +5,7 @@
   const title = $('#status-title');
   const detail = $('#status-detail');
   const health = $('#health-badge');
-  const notice = $('#notice');
-  const settingsNotice = $('#settings-notice');
+  const toastRegion = $('#toast-region');
   const accountsNode = $('#accounts');
   const loginDialog = $('#login-dialog');
   const settingsDialog = $('#settings-dialog');
@@ -17,11 +16,27 @@
     return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
   }
 
-  function announce(message, isError = false, inSettings = false) {
-    const target = inSettings ? settingsNotice : notice;
-    target.hidden = !message;
-    target.textContent = message;
-    target.setAttribute('role', isError ? 'alert' : 'status');
+  let toastTimer = 0;
+  function announce(message, isError = false) {
+    if (!message) return;
+    window.clearTimeout(toastTimer);
+    toastRegion.replaceChildren();
+    const toast = document.createElement('div');
+    toast.className = `toast ${isError ? 'error' : 'success'}`;
+    toast.setAttribute('role', isError ? 'alert' : 'status');
+    toast.tabIndex = -1;
+    const icon = document.createElement('span');
+    icon.className = 'toast-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = isError ? '!' : '✓';
+    const copy = document.createElement('span');
+    copy.textContent = message;
+    toast.append(icon, copy);
+    toastRegion.append(toast);
+    if (isError) toast.focus({ preventScroll: true });
+    toastTimer = window.setTimeout(() => {
+      if (toast.parentNode === toastRegion) toastRegion.replaceChildren();
+    }, isError ? 6500 : 4200);
   }
 
   async function api(url, options = {}) {
@@ -163,14 +178,19 @@
     for (const account of state.accounts) {
       const fragment = $('#account-template').content.cloneNode(true);
       const card = fragment.querySelector('.account-row'); card.dataset.accountId = account.id;
-      fragment.querySelector('.account-name').textContent = `${account.label || 'Account'}${account.planLabel ? ` · ${account.planLabel}` : ''}`;
-      fragment.querySelector('.account-identity').textContent = account.connected ? (account.email || 'Connected') : (account.error || 'Not connected');
+      fragment.querySelector('.account-name').textContent = account.email || (account.connected ? 'Connected account' : 'Connect your account');
+      const plan = fragment.querySelector('.account-plan');
+      plan.textContent = account.planLabel || '';
+      plan.hidden = !account.planLabel;
+      fragment.querySelector('.account-identity').textContent = account.connected
+        ? (account.controller ? 'Primary account' : 'Ready to route')
+        : (account.error || 'Not connected');
       const status = accountStatus(account);
       const statusNode = fragment.querySelector('.account-state'); statusNode.textContent = status.label; statusNode.classList.add(status.className);
       appendUsage(fragment.querySelector('.usage'), account);
       const enabled = fragment.querySelector('.enabled');
       enabled.checked = Boolean(account.enabled);
-      enabled.setAttribute('aria-label', `Use ${account.label || 'this account'} for routing`);
+      enabled.setAttribute('aria-label', `Use ${account.email || 'this account'} for routing`);
       fragment.querySelector('.enabled-text').textContent = enabled.checked ? 'Use this account' : 'Account paused';
       enabled.addEventListener('change', () => updateAccount(account.id, { enabled: enabled.checked }));
       fragment.querySelector('.rename').addEventListener('click', () => renameAccount(account));
@@ -194,12 +214,6 @@
   async function loadAccounts() {
     const result = await api('/v1/accounts');
     state.accounts = result.accounts || [];
-    for (const account of state.accounts) {
-      if (account.connected && state.pending.delete(account.id)) {
-        if (state.activeLoginAccountId === account.id) closeLoginDialog();
-        announce(`${account.label || account.email || 'Account'} is connected and ready.`);
-      }
-    }
     render();
   }
 
@@ -240,8 +254,28 @@
   function openLoginWindow() {
     const popup = window.open('', 'flow-openai-connect', 'popup,width=560,height=760');
     if (popup) {
-      popup.document.title = 'FLOW';
-      popup.document.body.innerHTML = '<main style="min-height:100vh;display:grid;place-items:center;margin:0;background:#090a0d;color:#f5f5f7;font:16px system-ui">Opening OpenAI…</main>';
+      const document = popup.document;
+      document.title = 'FLOW';
+      document.documentElement.lang = 'en';
+      document.head.replaceChildren();
+      const viewport = document.createElement('meta');
+      viewport.name = 'viewport';
+      viewport.content = 'width=device-width, initial-scale=1';
+      const stylesheet = document.createElement('link');
+      stylesheet.rel = 'stylesheet';
+      stylesheet.href = new URL('/assets/app.css', location.origin).href;
+      document.head.append(viewport, stylesheet);
+      document.body.replaceChildren();
+      const opening = document.createElement('main');
+      opening.className = 'login-opening';
+      opening.setAttribute('aria-live', 'polite');
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner';
+      spinner.setAttribute('aria-hidden', 'true');
+      const label = document.createElement('span');
+      label.textContent = 'Opening OpenAI…';
+      opening.append(spinner, label);
+      document.body.append(opening);
     }
     return popup;
   }
@@ -300,6 +334,24 @@
     }
   }
 
+  async function finishLogin(accountId, attempt) {
+    const current = state.pending.get(accountId);
+    if (!current || current.id !== attempt.id || attempt.state === 'pending') return;
+    state.pending.delete(accountId);
+    closeLoginDialog(true);
+    const terminalMessage = attempt.state === 'succeeded'
+      ? 'Account connected'
+      : loginFailureMessage(attempt.error, attempt.state);
+    const terminalIsError = attempt.state !== 'succeeded' && attempt.state !== 'cancelled';
+    try {
+      await loadAccounts();
+      announce(terminalMessage, terminalIsError);
+    } catch (_) {
+      render();
+      announce(`${terminalMessage}. Reopen FLOW to refresh the account list.`, true);
+    }
+  }
+
   async function watchLogin(accountId, attemptId) {
     if (!attemptId) return;
     const active = state.pending.get(accountId);
@@ -309,19 +361,8 @@
       const current = state.pending.get(accountId);
       if (!current || current.id !== attemptId) return;
       const attempt = result.attempt;
-      if (attempt.state === 'pending') { setTimeout(() => watchLogin(accountId, attemptId), 1500); return; }
-      state.pending.delete(accountId); closeLoginDialog(true);
-      const terminalMessage = attempt.state === 'succeeded'
-        ? 'Account connected and ready.'
-        : loginFailureMessage(attempt.error, attempt.state);
-      const terminalIsError = attempt.state !== 'succeeded' && attempt.state !== 'cancelled';
-      try {
-        await loadAccounts();
-        announce(terminalMessage, terminalIsError);
-      } catch (_) {
-        render();
-        announce(`${terminalMessage} The account list could not refresh; reopen FLOW.`, true);
-      }
+      if (attempt.state === 'pending') { setTimeout(() => watchLogin(accountId, attemptId), 1000); return; }
+      await finishLogin(accountId, attempt);
     } catch (error) {
       const current = state.pending.get(accountId);
       if (!current || current.id !== attemptId) return;
@@ -339,7 +380,7 @@
       await api(`/v1/login-attempts/${encodeURIComponent(pending.id)}/cancel`, { method: 'POST', body: '{}' });
       state.pending.delete(accountId); closeLoginDialog(true); announce('Sign-in cancelled.');
       try { await loadAccounts(); announce('Sign-in cancelled.'); }
-      catch (_) { render(); announce('Sign-in cancelled. The account list could not refresh; reopen FLOW.', true); }
+      catch (_) { render(); announce('Sign-in cancelled. Reopen FLOW to refresh the account list.', true); }
     } catch (error) { announce(requestFailureMessage(error, 'Sign-in could not be cancelled. Try again.'), true); }
   }
 
@@ -350,7 +391,6 @@
       announce('Account removed. Its local data was archived for recovery.');
       try { await loadAccounts(); }
       catch (_) { render(); announce('Account removed. The account list could not refresh; reopen FLOW.', true); }
-      notice.focus();
     } catch (error) { announce(requestFailureMessage(error, 'This account could not be removed. Try again.'), true); }
   }
 
@@ -422,13 +462,13 @@
 
   async function migrateCodexLB() {
     const files = Array.from($('#codex-lb-files').files || []);
-    if (!files.length) return announce('Choose at least one codex-lb auth export.', true, true);
-    if (!$('#codex-lb-paused').checked) return announce('Pause codex-lb for these accounts before importing.', true, true);
+    if (!files.length) return announce('Choose at least one codex-lb auth export.', true);
+    if (!$('#codex-lb-paused').checked) return announce('Pause codex-lb for these accounts before importing.', true);
     if (state.migrationInFlight) return;
     const signature = migrationSignature(files);
     if (!state.migrationReview || state.migrationReview.signature !== signature) {
-      try { state.migrationReview = await prepareMigration(files); showMigrationReview(state.migrationReview); return announce('Check the account mapping, then import.', false, true); }
-      catch (error) { state.migrationReview = null; return announce(`Couldn’t review this import. ${error.message}`, true, true); }
+      try { state.migrationReview = await prepareMigration(files); showMigrationReview(state.migrationReview); return announce('Check the account mapping, then import.'); }
+      catch (error) { state.migrationReview = null; return announce(`Couldn’t review this import. ${error.message}`, true); }
     }
     state.migrationInFlight = true;
     const button = $('#migrate-codex-lb'); button.disabled = true; let imported = 0;
@@ -442,13 +482,13 @@
         imported += 1;
       } catch (error) {
         state.migrationInFlight = false; button.disabled = false; await loadAccounts().catch(() => {});
-        return announce(requestFailureMessage(error, `Imported ${imported} of ${files.length}. This account could not be imported. Try again.`), true, true);
+        return announce(requestFailureMessage(error, `Imported ${imported} of ${files.length}. This account could not be imported. Try again.`), true);
       }
     }
     state.migrationInFlight = false; state.migrationReview = null; button.disabled = false; button.textContent = 'Review import';
     $('#migration-preview').hidden = true;
-    try { await loadAccounts(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported.`, false, true); }
-    catch (_) { render(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported. The account list could not refresh; reopen FLOW.`, true, true); }
+    try { await loadAccounts(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported.`); }
+    catch (_) { render(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported. Reopen FLOW to refresh the account list.`, true); }
   }
 
   function setOffline(error) {
@@ -459,7 +499,16 @@
 
   function subscribe() {
     state.events?.close(); state.events = new EventSource('/v1/events');
-    state.events.onmessage = () => loadAccounts().catch(setOffline);
+    state.events.onmessage = (event) => {
+      let payload = null;
+      try { payload = JSON.parse(event.data); } catch (_) {}
+      const attempt = payload?.type === 'account-login' ? payload.data : null;
+      if (attempt?.id && attempt.state && attempt.state !== 'pending') {
+        const match = Array.from(state.pending.entries()).find(([, pending]) => pending.id === attempt.id);
+        if (match) { void finishLogin(match[0], attempt); return; }
+      }
+      loadAccounts().catch(setOffline);
+    };
     state.events.onerror = () => { state.events.close(); setTimeout(() => loadAccounts().then(subscribe).catch(setOffline), 2000); };
   }
 
@@ -481,7 +530,7 @@
   loginDialog.addEventListener('cancel', (event) => { event.preventDefault(); cancelActiveLogin(); });
   $('#migrate-codex-lb').addEventListener('click', migrateCodexLB);
   $('#codex-lb-files').addEventListener('change', () => {
-    state.migrationReview = null; $('#migration-preview').hidden = true; $('#migrate-codex-lb').textContent = 'Review import'; announce('', false, true);
+    state.migrationReview = null; $('#migration-preview').hidden = true; $('#migrate-codex-lb').textContent = 'Review import'; announce('');
   });
   start();
 })();

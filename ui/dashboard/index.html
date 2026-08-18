@@ -23,8 +23,9 @@
     </div>
   </header>
 
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
+
   <main class="shell">
-    <div id="notice" class="notice" role="status" aria-live="polite" tabindex="-1" hidden></div>
     <section class="router-summary" aria-labelledby="status-title">
       <div>
         <h1 id="status-title">Checking accounts…</h1>
@@ -55,7 +56,6 @@
       <h2 id="settings-title">Settings</h2>
       <button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button>
     </div>
-    <div id="settings-notice" class="notice" role="status" aria-live="polite" tabindex="-1" hidden></div>
     <section class="settings-section" aria-labelledby="migration-title">
       <h3 id="migration-title">Import from codex-lb</h3>
       <p>Reuse accounts you already connected. Pause codex-lb for those accounts first so only one app refreshes their sign-in.</p>
@@ -83,6 +83,7 @@
       <div class="account-identity-block">
         <div class="account-title-line">
           <h3 class="account-name"></h3>
+          <span class="account-plan" hidden></span>
           <span class="account-state"></span>
         </div>
         <p class="account-identity"></p>

@@ -25,6 +25,8 @@ func TestStaticDashboardContracts(t *testing.T) {
 		"settings-dialog",
 		"login-dialog",
 		"Cancel sign-in",
+		"toast-region",
+		"account-plan",
 	} {
 		if !strings.Contains(html, text) {
 			t.Errorf("index is missing %q", text)
@@ -38,7 +40,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("dashboard retained non-essential copy %q", removed)
 		}
 	}
-	for _, contract := range []string{"min-width: 0", "min-height: 44px", "min(calc(100% - 1.5rem), 46rem)", ".dialog:focus { outline: none; }", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
+	for _, contract := range []string{"min-width: 0", "min-height: 44px", "min(calc(100% - 1.5rem), 46rem)", ".dialog:focus { outline: none; }", ".toast.success", ".toast.error", ".login-opening", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
 		if !strings.Contains(css, contract) {
 			t.Errorf("CSS is missing %q", contract)
 		}
@@ -48,7 +50,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("accessible dashboard styling is missing %q", contract)
 		}
 	}
-	for _, contract := range []string{"history.replaceState", "connectAttempt", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for approval", "Account connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this import", "Opening OpenAI", "Repair", "const needsRepair = Boolean(account.error)", "login.hidden = account.connected && !needsRepair", "codexMuxTrustedBrowserLoginURL", "getAll('redirect_uri')", "'/oauth/authorize'", "'/auth/callback'", "response_type", "code_challenge_method", "login?.verificationUrl", "window.open('', 'flow-openai-connect'", "popup.location.replace(uri)", "state.loginWindow.close()", "notice.focus()", "Ready to route", "No usage available", "hasCapacity", "% left", "showModal()"} {
+	for _, contract := range []string{"history.replaceState", "connectAttempt", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for approval", "Account connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this import", "Opening OpenAI", "Repair", "const needsRepair = Boolean(account.error)", "login.hidden = account.connected && !needsRepair", "codexMuxTrustedBrowserLoginURL", "getAll('redirect_uri')", "'/oauth/authorize'", "'/auth/callback'", "response_type", "code_challenge_method", "login?.verificationUrl", "window.open('', 'flow-openai-connect'", "popup.location.replace(uri)", "state.loginWindow.close()", "toastRegion.replaceChildren()", "finishLogin", "payload?.type === 'account-login'", "Ready to route", "No usage available", "hasCapacity", "% left", "showModal()"} {
 		if !strings.Contains(js, contract) {
 			t.Errorf("JavaScript is missing %q", contract)
 		}
@@ -60,6 +62,9 @@ func TestStaticDashboardContracts(t *testing.T) {
 	}
 	if strings.Contains(string(Index)+string(JS), "Account added.") {
 		t.Error("dashboard claims an account is added before OpenAI sign-in succeeds")
+	}
+	if strings.Contains(js, "style=") {
+		t.Error("dashboard JavaScript uses an inline style that violates the dashboard CSP")
 	}
 	for _, forbidden := range []string{"login?.deviceCode", "login?.device_code"} {
 		if strings.Contains(js, forbidden) {
