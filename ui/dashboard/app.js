@@ -191,7 +191,7 @@
         ? (account.controller ? 'Primary account' : 'Ready to route')
         : (account.error || 'Not connected');
       const status = accountStatus(account);
-      const statusNode = fragment.querySelector('.account-state'); statusNode.textContent = status.label; statusNode.classList.add(status.className);
+      const statusNode = fragment.querySelector('.account-state'); statusNode.textContent = status.label; if (status.className) statusNode.classList.add(status.className);
       appendUsage(fragment.querySelector('.usage'), account);
       const enabled = fragment.querySelector('.enabled');
       enabled.checked = Boolean(account.enabled);
