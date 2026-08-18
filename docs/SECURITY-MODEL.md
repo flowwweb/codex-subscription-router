@@ -41,8 +41,10 @@ shared plugin configuration.
 
 ## Network
 
-On Windows v2, the control server binds to a dynamic numeric `127.0.0.1`
-endpoint. The exact address lives in an owner-only runtime receipt. The
+On Windows v2, the control server binds to the reserved `127.0.0.1:48123`
+endpoint. The runtime lease is acquired before binding, and a port conflict
+fails closed instead of falling back to another port. The runtime identity
+still lives in an owner-only receipt. The
 preserved macOS direct patcher still uses its legacy fixed control port; the
 Windows endpoint-ownership proof does not extend to that path. Unexpected Host and Origin
 values, cross-origin preflights, query-token authentication, non-JSON mutation

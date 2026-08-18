@@ -17,8 +17,6 @@ control-token
 state.json
 
 # Signing and local credentials must never enter source control.
-.env
-.env.*
 !.env.example
 *.cer
 *.key
@@ -35,3 +33,4 @@ state.json
 !/screenshots/plugin-account-picker-secondary-final.png
 !/screenshots/quota-all-depleted.png
 !/screenshots/rate-limit-reset-accounts.png
+config.bat

@@ -106,6 +106,6 @@ await successContext.run('primary', { id: 'attempt-success', state: 'succeeded' 
 assert.equal(finishingShown, 1);
 assert.equal(successClosed, 1);
 assert.equal(accountsLoaded, 1);
-assert.deepEqual(notices.pop(), ['Account connected']);
+assert.deepEqual(notices.pop(), ['Account connected', false]);
 
 console.log("Dashboard session expiry contracts passed");

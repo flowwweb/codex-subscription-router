@@ -81,7 +81,7 @@ func TestWindowsUsesExeSiblingName(t *testing.T) {
 }
 
 func TestIssuedDashboardURLCannotBeReplayed(t *testing.T) {
-	owner, err := muxruntime.Acquire(t.TempDir(), "test-build")
+	owner, err := muxruntime.AcquireForTest(t.TempDir(), "test-build")
 	if err != nil {
 		t.Fatal(err)
 	}

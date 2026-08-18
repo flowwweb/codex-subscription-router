@@ -49,9 +49,10 @@ the official app's privacy grants and app-group container.
 
 On Windows, the installer leaves the official Windows package in place and
 installs one per-user daemon plus a thin app-server stdio bridge. The daemon
-holds an OS-level single-owner lease, owns every account child, binds dynamic
-numeric-loopback readiness/control/bridge endpoints, and writes their PID,
-build, instance, and addresses to a protected atomic runtime receipt.
+holds an OS-level single-owner lease, owns every account child, binds the
+stable `127.0.0.1:48123` control endpoint plus private dynamic-loopback
+readiness/bridge endpoints, and writes their PID, build, instance, and
+addresses to a protected atomic runtime receipt.
 `CODEX_MUX_REAL_CODEX` points at the user-local backend used by the official
 Windows app (or an explicitly supplied backend), while `CODEX_MUX_HOME` and
 `CODEX_HOME` point to router-owned state and primary-account directories. The
@@ -71,7 +72,7 @@ before forwarding the strict RPC request to the chosen child.
 ## Control API
 
 The macOS renderer retains its loopback token contract. Windows uses the
-daemon's dynamic control address. Embedded dashboard assets are served
+daemon's stable control address. Embedded dashboard assets are served
 same-origin; a fresh fragment nonce is exchanged once for an HttpOnly,
 SameSite=Strict browser session. Mutations require CSRF, Host and Origin are
 restricted to the exact numeric-loopback listener, and SSE uses the session
