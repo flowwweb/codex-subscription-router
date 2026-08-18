@@ -101,6 +101,10 @@
     return { label: 'Ready', className: 'ready' };
   }
 
+  function isPlaceholderAccount(account) {
+    return !account.connected && !account.email && !account.error && /^Account \d+$/.test(account.label || '');
+  }
+
   function renderSummary() {
     const usable = state.accounts.filter(hasCapacity);
     const enabled = state.accounts.filter((account) => account.connected && account.enabled && !account.error);
@@ -214,7 +218,7 @@
 
   async function loadAccounts() {
     const result = await api('/v1/accounts');
-    state.accounts = result.accounts || [];
+    state.accounts = (result.accounts || []).filter((account) => !isPlaceholderAccount(account));
     render();
   }
 
@@ -289,10 +293,19 @@
     link.hidden = !uri;
     if (!link.hidden) link.href = uri;
     link.target = state.loginWindowName || '_blank';
+    $('#login-instruction').textContent = 'Finish sign-in in the OpenAI window.';
     $('#login-status').textContent = 'Waiting for approval…';
+    $('#cancel-login').hidden = false;
     if (!loginDialog.open) loginDialog.showModal();
     loginDialog.focus();
     if (uri && popup && !popup.closed) popup.location.replace(uri);
+  }
+
+  function showLoginFinishing() {
+    $('#login-instruction').textContent = 'OpenAI is done. FLOW is syncing your account.';
+    $('#login-status').textContent = 'Finishing connection…';
+    $('#login-link').hidden = true;
+    $('#cancel-login').hidden = true;
   }
 
   function closeLoginDialog(closePopup = false) {
@@ -342,11 +355,26 @@
     const current = state.pending.get(accountId);
     if (!current || current.id !== attempt.id || attempt.state === 'pending') return;
     state.pending.delete(accountId);
-    closeLoginDialog(true);
     const terminalMessage = attempt.state === 'succeeded'
       ? 'Account connected'
       : loginFailureMessage(attempt.error, attempt.state);
     const terminalIsError = attempt.state !== 'succeeded' && attempt.state !== 'cancelled';
+    if (attempt.state === 'succeeded') {
+      showLoginFinishing();
+      const settling = new Promise((resolve) => window.setTimeout(resolve, 450));
+      try {
+        await Promise.all([loadAccounts(), settling]);
+        closeLoginDialog(true);
+        announce(terminalMessage);
+      } catch (_) {
+        await settling;
+        closeLoginDialog(true);
+        render();
+        announce(`${terminalMessage}. Reopen FLOW to refresh the account list.`, true);
+      }
+      return;
+    }
+    closeLoginDialog(true);
     try {
       await loadAccounts();
       announce(terminalMessage, terminalIsError);

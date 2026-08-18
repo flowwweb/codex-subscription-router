@@ -86,4 +86,26 @@ assert.equal(migrationState.migrationInFlight, false);
 assert.equal(migrationButton.disabled, false);
 assert.deepEqual(notices.pop(), [expired, true, true]);
 
+let finishingShown = 0;
+let successClosed = 0;
+let accountsLoaded = 0;
+const successState = { pending: new Map([['primary', { id: 'attempt-success' }]]) };
+const successContext = vm.createContext({
+  state: successState,
+  showLoginFinishing: () => { finishingShown += 1; },
+  closeLoginDialog: () => { successClosed += 1; },
+  loadAccounts: async () => { accountsLoaded += 1; },
+  announce: (...args) => notices.push(args),
+  render: () => {},
+  loginFailureMessage: () => 'failed',
+  window: { setTimeout },
+  Promise,
+});
+vm.runInContext(`${extractFunction('finishLogin')}; this.run = finishLogin;`, successContext);
+await successContext.run('primary', { id: 'attempt-success', state: 'succeeded' });
+assert.equal(finishingShown, 1);
+assert.equal(successClosed, 1);
+assert.equal(accountsLoaded, 1);
+assert.deepEqual(notices.pop(), ['Account connected']);
+
 console.log("Dashboard session expiry contracts passed");

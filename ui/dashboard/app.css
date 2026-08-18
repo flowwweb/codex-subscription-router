@@ -53,8 +53,9 @@ p { margin: .45rem 0 0; color: #9699a5; line-height: 1.5; }
   font-weight: 650;
   transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
 }
-.primary { border-color: #7363e8; background: #6d5ce7; color: #fff; }
+.primary { border-color: #7363e8; background: #6d5ce7; color: #fff; display: inline-flex; align-items: center; justify-content: center; gap: .45rem; }
 .primary:hover { background: #7b6aef; }
+.button-icon { width: 1rem; height: 1rem; flex: 0 0 auto; }
 .quiet:hover, .menu-action:hover, .icon-button:hover, .account-menu summary:hover { border-color: #555965; background: #17181e; }
 .primary:active, .quiet:active, .menu-action:active, .icon-button:active { transform: translateY(1px); }
 .accounts { display: grid; border-top: 1px solid #25272e; }
