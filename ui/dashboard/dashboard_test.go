@@ -12,13 +12,14 @@ func TestStaticDashboardContracts(t *testing.T) {
 	for _, text := range []string{
 		"Add account",
 		"Settings",
-		"Connect with ChatGPT",
+		"Connecting to OpenAI",
 		"About &amp; diagnostics",
-		"official Codex Windows app does not currently route through this standalone router",
+		"Open the installed FLOW app",
 		`aria-live="polite"`,
 		"Use this account",
 		"migration-preview",
 		"technical-build",
+		"FLOW",
 		"Codex Router",
 		"flowwweb-icon.png",
 		"settings-dialog",
@@ -46,15 +47,18 @@ func TestStaticDashboardContracts(t *testing.T) {
 			t.Errorf("accessible dashboard styling is missing %q", contract)
 		}
 	}
-	for _, contract := range []string{"history.replaceState", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for confirmation", "Account connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this import", "Open ChatGPT", "Repair", "const needsRepair = Boolean(account.error)", "login.hidden = account.connected && !needsRepair", "codexMuxTrustedBrowserLoginURL", "getAll('redirect_uri')", "'/oauth/authorize'", "'/auth/callback'", "response_type", "code_challenge_method", "login?.userCode", "login?.verificationUrl", "notice.focus()", "Ready to route", "No usage available", "hasCapacity", "% left", "showModal()"} {
+	for _, contract := range []string{"history.replaceState", "credentials: 'same-origin'", "X-Codex-Mux-CSRF", "new EventSource('/v1/events')", "Router is offline", "Waiting for approval", "Account connected", "sourcePaused: true", "Sign-in cancelled", "account.controller", "Review this import", "Opening OpenAI", "Repair", "const needsRepair = Boolean(account.error)", "login.hidden = account.connected && !needsRepair", "codexMuxTrustedBrowserLoginURL", "getAll('redirect_uri')", "'/oauth/authorize'", "'/auth/callback'", "response_type", "code_challenge_method", "login?.verificationUrl", "window.open('', 'flow-openai-connect'", "popup.location.replace(uri)", "state.loginWindow.close()", "notice.focus()", "Ready to route", "No usage available", "hasCapacity", "% left", "showModal()"} {
 		if !strings.Contains(js, contract) {
 			t.Errorf("JavaScript is missing %q", contract)
 		}
 	}
-	for _, contract := range []string{"error.status = response.status", "error?.status === 401", "Dashboard access expired. Open Codex Router again.", "Sign-in could not be cancelled. Try again.", "A new account could not be added. Try again."} {
+	for _, contract := range []string{"error.status = response.status", "error?.status === 401", "Dashboard access expired. Open FLOW again.", "Sign-in could not be cancelled. Try again.", "A new account could not be added. Try again."} {
 		if !strings.Contains(js, contract) {
 			t.Errorf("dashboard session recovery is missing %q", contract)
 		}
+	}
+	if strings.Contains(string(Index)+string(JS), "Account added.") {
+		t.Error("dashboard claims an account is added before OpenAI sign-in succeeds")
 	}
 	for _, forbidden := range []string{"login?.deviceCode", "login?.device_code"} {
 		if strings.Contains(js, forbidden) {

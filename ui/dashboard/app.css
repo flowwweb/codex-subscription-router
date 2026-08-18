@@ -22,9 +22,14 @@ a { color: #b8adff; }
   gap: 1rem;
   border-bottom: 1px solid #202127;
 }
-.brand { display: inline-flex; align-items: center; gap: .65rem; font-size: .95rem; font-weight: 720; letter-spacing: -.01em; }
+.brand { display: inline-flex; align-items: center; gap: .65rem; }
 .brand-mark { width: 1.75rem; height: 1.75rem; display: block; image-rendering: auto; }
+.brand-copy { display: grid; gap: .05rem; line-height: 1; }
+.brand-copy strong { font-size: .9rem; font-weight: 760; letter-spacing: .08em; }
+.brand-copy small { color: #858894; font-size: .64rem; font-weight: 600; letter-spacing: .01em; }
 .top-actions { display: flex; align-items: center; gap: .55rem; }
+.icon-only { width: 44px; padding: 0; display: grid; place-items: center; }
+.icon-only svg { width: 1.15rem; height: 1.15rem; }
 .health { display: inline-flex; align-items: center; gap: .45rem; color: #a8abb5; font-size: .78rem; }
 .health::before { content: ""; width: .45rem; height: .45rem; border-radius: 50%; background: #7b7e89; }
 .health.ready::before { background: #56d895; box-shadow: 0 0 0 .22rem rgba(86, 216, 149, .08); }
@@ -87,9 +92,13 @@ progress::-moz-progress-bar { background: #7662f2; border-radius: 99px; }
 .dialog::backdrop { background: rgba(3,4,7,.72); backdrop-filter: blur(5px); }
 .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; }
 .icon-button { flex: 0 0 auto; width: 44px; padding: 0; font-size: 1.4rem; font-weight: 400; }
-.device-code { margin: 1.4rem 0; color: #fff; font: 750 clamp(1.75rem, 9vw, 2.5rem) ui-monospace, monospace; letter-spacing: .14em; text-align: center; user-select: all; }
 .action-link { min-height: 48px; display: flex; align-items: center; justify-content: center; text-decoration: none; }
-.waiting { margin: 1rem 0; text-align: center; font-size: .85rem; }
+.connection-status { min-height: 3.5rem; margin: 1rem 0; display: flex; align-items: center; justify-content: center; gap: .65rem; color: #c9cad0; font-size: .85rem; }
+.spinner { width: 1rem; height: 1rem; border: 2px solid #403b63; border-top-color: #9a88ff; border-radius: 50%; animation: spin .8s linear infinite; }
+.text-action { border: 0; background: transparent; color: #858894; padding: .7rem; }
+.text-action:hover { color: #d5d6dc; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; border-color: #9a88ff; } }
 .full-width { width: 100%; }
 .settings-section { padding: 1.15rem 0 1.5rem; border-block: 1px solid #272930; }
 .settings-section > p { font-size: .84rem; }

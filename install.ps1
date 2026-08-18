@@ -2,6 +2,7 @@
 param(
     [string] $OfficialExecutable,
     [string] $CodexExecutable,
+    [string] $RouterAppRoot,
     [switch] $NoLaunch
 )
 
@@ -200,10 +201,17 @@ if ($env:OS -ne "Windows_NT") {
 if (-not (Get-Command go.exe -ErrorAction SilentlyContinue)) {
     Fail "Go 1.26 or newer is required"
 }
+if (-not (Get-Command node.exe -ErrorAction SilentlyContinue) -or -not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+    Fail "Node.js 22 or newer is required to build the independently patched Codex Router app"
+}
 
 $normalizedSourceRoot = Get-NormalizedPath $sourceRoot
 $normalizedInstallRoot = Get-NormalizedPath $installRoot
+$routerAppRoot = if ([string]::IsNullOrWhiteSpace($RouterAppRoot)) { Join-Path $env:LOCALAPPDATA "Codex Router App" } else { [System.IO.Path]::GetFullPath($RouterAppRoot) }
+$normalizedRouterAppRoot = Get-NormalizedPath $routerAppRoot
 Assert-NoPathCollision "source checkout" $normalizedSourceRoot "router install" $normalizedInstallRoot
+Assert-NoPathCollision "source checkout" $normalizedSourceRoot "router app" $normalizedRouterAppRoot
+Assert-NoPathCollision "router install" $normalizedInstallRoot "router app" $normalizedRouterAppRoot
 
 $official = Get-AbsolutePath (Resolve-OfficialExecutable -ExplicitPath $OfficialExecutable)
 $officialRoot = Split-Path -Parent $official
@@ -223,6 +231,8 @@ $codexBackend = Get-AbsolutePath (Resolve-CodexBackend -ExplicitPath $CodexExecu
 
 Assert-NoPathCollision "official app" (Get-NormalizedPath $officialRoot) "router install" $normalizedInstallRoot
 Assert-NoPathCollision "Codex backend" (Get-NormalizedPath (Split-Path -Parent $codexBackend)) "router install" $normalizedInstallRoot
+Assert-NoPathCollision "official app" (Get-NormalizedPath $officialRoot) "router app" $normalizedRouterAppRoot
+Assert-NoPathCollision "Codex backend" (Get-NormalizedPath (Split-Path -Parent $codexBackend)) "router app" $normalizedRouterAppRoot
 
 $asar = Join-Path $officialRoot "resources\app.asar"
 $beforeAsarHash = (Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash
@@ -251,9 +261,26 @@ $launchScript = Join-Path $versionRoot "launch-router.ps1"
 $dashboardScript = Join-Path $versionRoot "open-dashboard.ps1"
 $versionConnectScript = Join-Path $versionRoot "connect-account.ps1"
 $connectScript = Join-Path $installRoot "Connect Codex Router Account.ps1"
+$routerAppLauncher = Join-Path $installRoot "Open FLOW.ps1"
+$protocolScript = Join-Path $installRoot "codex-router-protocol.ps1"
+$routerAppDestination = Join-Path $routerAppRoot "app"
+$routerAppUserData = Join-Path $installRoot "app-user-data"
+$routerAppStaging = Join-Path $routerAppRoot (".staging-{0}" -f [Guid]::NewGuid().ToString("N"))
+$routerAppExecutable = Join-Path $routerAppDestination "ChatGPT.exe"
 $publishVersionScript = Join-Path $sourceRoot "scripts\windows\publish-version.ps1"
 
-New-Item -ItemType Directory -Force -Path $installRoot,$stateRoot,$primaryCodexHome,$versionsRoot,$stagingRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $installRoot,$stateRoot,$primaryCodexHome,$routerAppUserData,$versionsRoot,$stagingRoot,$routerAppRoot | Out-Null
+if ((Get-Item -LiteralPath $routerAppRoot -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+    Fail "router app root cannot be a reparse point: $routerAppRoot"
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot "node_modules\@electron\asar") -PathType Container)) {
+    Push-Location $sourceRoot
+    try {
+        & npm.cmd ci --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { Fail "npm dependency installation failed" }
+    } finally { Pop-Location }
+}
 
 Push-Location $sourceRoot
 try {
@@ -263,6 +290,38 @@ try {
     }
 } finally {
     Pop-Location
+}
+
+$runningRouterApp = Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ExecutablePath -and (Get-NormalizedPath $_.ExecutablePath).Equals((Get-NormalizedPath $routerAppExecutable), [System.StringComparison]::OrdinalIgnoreCase) } |
+    Select-Object -First 1
+if ($runningRouterApp) { Fail "quit Codex Router before updating its app files" }
+
+$copyOutput = & robocopy.exe $officialRoot $routerAppStaging /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
+if ($LASTEXITCODE -gt 7) { Fail "could not copy the official Codex app into independent staging (robocopy exit $LASTEXITCODE)" }
+$stagedAppAsar = Join-Path $routerAppStaging "resources\app.asar"
+$patchReceipt = & node.exe (Join-Path $sourceRoot "scripts\windows\patch-codex-app.mjs") --asar $stagedAppAsar | Select-Object -Last 1 | ConvertFrom-Json
+if (-not $patchReceipt.patched -or [string]$patchReceipt.menuItem -ne "Add account") { Fail "native account-menu patch did not return its expected receipt" }
+$stagedOfficialCodex = Join-Path $routerAppStaging "resources\codex.exe"
+$stagedRealCodex = Join-Path $routerAppStaging "resources\codex.real.exe"
+if (-not (Test-Path -LiteralPath $stagedOfficialCodex -PathType Leaf) -or (Test-Path -LiteralPath $stagedRealCodex)) {
+    Fail "independent app Codex backend layout changed"
+}
+Move-Item -LiteralPath $stagedOfficialCodex -Destination $stagedRealCodex
+Copy-Item -LiteralPath $stagedMuxExecutable -Destination $stagedOfficialCodex
+$routerAppAsarHash = (Get-FileHash -LiteralPath $stagedAppAsar -Algorithm SHA256).Hash
+$routerAppBackup = $null
+if (Test-Path -LiteralPath $routerAppDestination) {
+    $routerAppBackup = Join-Path $routerAppRoot ("backup-{0}" -f [DateTime]::UtcNow.ToString("yyyyMMddHHmmss"))
+    Move-Item -LiteralPath $routerAppDestination -Destination $routerAppBackup
+}
+try {
+    Move-Item -LiteralPath $routerAppStaging -Destination $routerAppDestination
+} catch {
+    if ($routerAppBackup -and (Test-Path -LiteralPath $routerAppBackup) -and -not (Test-Path -LiteralPath $routerAppDestination)) {
+        Move-Item -LiteralPath $routerAppBackup -Destination $routerAppDestination
+    }
+    throw
 }
 & $publishVersionScript -StagingRoot $stagingRoot -VersionRoot $versionRoot -ScriptsRoot (Join-Path $sourceRoot "scripts\windows")
 $muxHash = (Get-FileHash -LiteralPath $muxExecutable -Algorithm SHA256).Hash
@@ -279,6 +338,11 @@ $config = [ordered]@{
     launchScript = $launchScript
     dashboardScript = $dashboardScript
     connectScript = $connectScript
+    routerAppExecutable = $routerAppExecutable
+    routerAppAsarSha256 = $routerAppAsarHash
+    routerAppUserData = $routerAppUserData
+    routerAppLauncher = $routerAppLauncher
+    routerProtocol = "codex-router"
     stateRoot = $stateRoot
     primaryCodexHome = $primaryCodexHome
     officialVersion = (Get-Item -LiteralPath $official).VersionInfo.ProductVersion
@@ -342,6 +406,9 @@ $stateReceipt = [ordered]@{
     dashboardLauncher = Join-Path $installRoot "Open Subscription Router.cmd"
     connectScript = $connectScript
     connectLauncher = $connectScript
+    routerAppExecutable = $routerAppExecutable
+    routerAppLauncher = $routerAppLauncher
+    nativeAccountMenu = "Add account"
 }
 Write-Output (ConvertTo-Json -Depth 3 $stateReceipt)
 
@@ -383,13 +450,41 @@ if (-not $NoLaunch) {
         @{ Source = "scripts\windows\start-router.ps1"; Destination = "start-router.ps1" },
         @{ Source = "scripts\windows\open-dashboard.ps1"; Destination = "open-dashboard.ps1" },
         @{ Source = "scripts\windows\open-dashboard.cmd"; Destination = "Open Subscription Router.cmd" }
-        @{ Source = "scripts\windows\connect-account.ps1"; Destination = "Connect Codex Router Account.ps1" }
+        @{ Source = "scripts\windows\connect-account.ps1"; Destination = "Connect Codex Router Account.ps1" },
+        @{ Source = "scripts\windows\launch-codex-router-app.ps1"; Destination = "Open FLOW.ps1" },
+        @{ Source = "scripts\windows\codex-router-protocol.ps1"; Destination = "codex-router-protocol.ps1" }
     )) {
         $destination = Join-Path $installRoot $script.Destination
         $temporary = $destination + ".new"
         Copy-Item -LiteralPath (Join-Path $sourceRoot $script.Source) -Destination $temporary -Force
         Move-Item -LiteralPath $temporary -Destination $destination -Force
     }
+
+    $protocolRoot = "HKCU:\Software\Classes\codex-router"
+    New-Item -Path $protocolRoot -Force | Out-Null
+    Set-Item -Path $protocolRoot -Value "URL:Codex Router account connection"
+    New-ItemProperty -Path $protocolRoot -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
+    $protocolCommandKey = Join-Path $protocolRoot "shell\open\command"
+    New-Item -Path $protocolCommandKey -Force | Out-Null
+    $protocolCommand = '"{0}" -NoProfile -ExecutionPolicy Bypass -File "{1}"' -f (Join-Path $PSHOME "powershell.exe"), $protocolScript
+    Set-Item -Path $protocolCommandKey -Value $protocolCommand
+
+    $iconSource = Join-Path $sourceRoot "plugins\codex-router\assets\flowwweb-icon.ico"
+    $iconDestination = Join-Path $installRoot "flowwweb-icon.ico"
+    Copy-Item -LiteralPath $iconSource -Destination $iconDestination -Force
+    $legacyRouterLauncher = Join-Path $installRoot "Open Codex Router.ps1"
+    if (Test-Path -LiteralPath $legacyRouterLauncher -PathType Leaf) { Remove-Item -LiteralPath $legacyRouterLauncher -Force }
+    $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    $legacyShortcut = Join-Path $startMenu "Codex Router.lnk"
+    if (Test-Path -LiteralPath $legacyShortcut -PathType Leaf) { Remove-Item -LiteralPath $legacyShortcut -Force }
+    $shortcutPath = Join-Path $startMenu "FLOW.lnk"
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = Join-Path $PSHOME "powershell.exe"
+    $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $routerAppLauncher
+    $shortcut.WorkingDirectory = $installRoot
+    $shortcut.IconLocation = "$iconDestination,0"
+    $shortcut.Save()
 
     $taskService = New-Object -ComObject "Schedule.Service"
     $taskService.Connect()
@@ -435,6 +530,8 @@ if (-not $NoLaunch) {
         controlAddress = [string]$runtimeReceipt.controlAddress
         dashboardUrl = [string]$dashboardUrl
         launchAtSignIn = $true
+        routerAppExecutable = [string]$routerAppExecutable
+        nativeAccountMenu = "Add account"
     }))
 }
 
@@ -445,7 +542,9 @@ if ($NoLaunch) {
         @{ Source = "scripts\windows\start-router.ps1"; Destination = "start-router.ps1" },
         @{ Source = "scripts\windows\open-dashboard.ps1"; Destination = "open-dashboard.ps1" },
         @{ Source = "scripts\windows\open-dashboard.cmd"; Destination = "Open Subscription Router.cmd" }
-        @{ Source = "scripts\windows\connect-account.ps1"; Destination = "Connect Codex Router Account.ps1" }
+        @{ Source = "scripts\windows\connect-account.ps1"; Destination = "Connect Codex Router Account.ps1" },
+        @{ Source = "scripts\windows\launch-codex-router-app.ps1"; Destination = "Open FLOW.ps1" },
+        @{ Source = "scripts\windows\codex-router-protocol.ps1"; Destination = "codex-router-protocol.ps1" }
     )) {
         Copy-Item -LiteralPath (Join-Path $sourceRoot $script.Source) -Destination (Join-Path $installRoot $script.Destination) -Force
     }

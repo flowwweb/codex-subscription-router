@@ -3,9 +3,9 @@ name: codex-router
 description: Show Codex Router status or connect OpenAI accounts through its fixed installed Windows launcher. Use for an explicit `$codex-router` invocation, "show router status," "connect an OpenAI account," or "connect another OpenAI account." Do not use for generic or unrelated account connections such as Gmail, GitHub, cloud providers, or other services.
 ---
 
-# Codex Router
+# FLOW — Codex Router
 
-Use the installed launcher only. Status is the default action. Keep a connection attached until the launcher emits a terminal event.
+Use the installed FLOW launcher only. Status is the default action. Keep a connection attached until the launcher emits a terminal event.
 
 ## Trust boundary
 
@@ -59,12 +59,12 @@ Run status, then invoke `-Action Connect -NewAccount`. Do not reuse an existing 
 
 Use only sanitized public fields emitted by the launcher. Keep account IDs internal. Do not claim the browser identity was selected or switched; OpenAI's page determines which identity signs in.
 
-- Sign-in: `OpenAI is open. Finish signing in to connect Account 2. I'll wait here.`
-- Connected: `Account 2 is connected. Codex Router has 2 accounts ready.`
+- Sign-in: `OpenAI is open. Finish signing in to connect Account 2. FLOW will wait here.`
+- Connected: `Account 2 is connected. FLOW has 2 accounts ready.`
 - Expired: `That sign-in expired. Say "connect account" to try again.`
 - Browser-open failure: `I couldn't open OpenAI. Open the trusted sign-in link. I'll wait here.`
 - Ambiguous selection: `Which account should I connect: Personal or Work?`
-- Install, integrity, or start failure: `Codex Router needs repair: <classified reason>. Re-run the installer, then try again.`
+- Install, integrity, or start failure: `FLOW needs repair: <classified reason>. Re-run the installer, then try again.`
 - Unexpected URL: `OpenAI returned an unexpected sign-in address, so I didn't open it. Try again.`
 - Provider failure: `OpenAI didn't connect the account: <sanitized provider failure>. Try "connect account" again.`
 - Cancelled: `Connection cancelled. Nothing changed.`

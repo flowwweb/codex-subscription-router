@@ -4,17 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#090a0d">
-  <title>Codex Router</title>
+  <title>FLOW — Codex Router</title>
   <link rel="icon" type="image/png" href="/assets/flowwweb-icon.png">
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <span class="brand"><img class="brand-mark" src="/assets/flowwweb-icon.png" alt="">Codex Router</span>
+    <span class="brand">
+      <img class="brand-mark" src="/assets/flowwweb-icon.png" alt="">
+      <span class="brand-copy"><strong>FLOW</strong><small>Codex Router</small></span>
+    </span>
     <div class="top-actions">
       <span id="health-badge" class="health" aria-live="polite">Starting</span>
-      <button id="open-settings" class="quiet" type="button">Settings</button>
+      <button id="open-settings" class="quiet icon-only" type="button" aria-label="Settings" title="Settings">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 8.25A3.75 3.75 0 1 0 12 15.75 3.75 3.75 0 0 0 12 8.25Zm8.25 3.75-.04-.74 1.56-1.22-1.75-3.03-1.84.75a8.8 8.8 0 0 0-1.28-.74l-.28-1.97h-3.5l-.28 1.97a8.8 8.8 0 0 0-1.28.74l-1.84-.75-1.75 3.03 1.56 1.22-.04.74.04.74-1.56 1.22 1.75 3.03 1.84-.75c.4.28.83.53 1.28.74l.28 1.97h3.5l.28-1.97c.45-.21.88-.46 1.28-.74l1.84.75 1.75-3.03-1.56-1.22.04-.74Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
     </div>
   </header>
 
@@ -37,14 +42,13 @@
 
   <dialog id="login-dialog" class="dialog login-dialog" aria-labelledby="login-title" tabindex="-1">
     <div class="dialog-head">
-      <h2 id="login-title">Connect with ChatGPT</h2>
+      <h2 id="login-title">Connecting to OpenAI</h2>
       <button id="close-login" class="icon-button" type="button" aria-label="Close sign-in">×</button>
     </div>
-    <p id="login-instruction">Finish sign-in in the ChatGPT window.</p>
-    <p id="login-code" class="device-code" aria-label="Verification code"></p>
-    <a id="login-link" class="primary action-link" target="_blank" rel="noopener noreferrer">Open ChatGPT</a>
-    <p id="login-status" class="waiting" aria-live="polite">Waiting for confirmation…</p>
-    <button id="cancel-login" class="quiet full-width" type="button">Cancel</button>
+    <p id="login-instruction">Finish sign-in in the OpenAI window.</p>
+    <div class="connection-status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span id="login-status">Waiting for approval…</span></div>
+    <a id="login-link" class="quiet action-link" target="flow-openai-connect" rel="noopener noreferrer">Open again</a>
+    <button id="cancel-login" class="text-action full-width" type="button">Cancel</button>
   </dialog>
 
   <dialog id="settings-dialog" class="dialog settings-dialog" aria-labelledby="settings-title" tabindex="-1">
@@ -65,8 +69,8 @@
     </section>
     <details class="diagnostics">
       <summary>About &amp; diagnostics</summary>
-      <p>Codex Router runs on this computer. Account credentials stay in protected local account homes.</p>
-      <p>The official Codex Windows app does not currently route through this standalone router.</p>
+      <p>FLOW runs on this computer. Account credentials stay in protected local account homes.</p>
+      <p>Open the installed FLOW app to route Codex through your connected accounts.</p>
       <dl>
         <div><dt>Build</dt><dd><code id="technical-build">Loading…</code></dd></div>
         <div><dt>State</dt><dd><code id="technical-state">Loading…</code></dd></div>

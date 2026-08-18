@@ -1,14 +1,15 @@
-# Codex Subscription Router
+# FLOW
 
 ![Multi-subscription account menu](screenshots/account-menu.png)
 
-Use multiple ChatGPT subscriptions through a local Windows app-server router
-and dashboard, or from an independently patched macOS desktop app.
+FLOW is a local Codex Router for Windows. It keeps connected ChatGPT accounts
+in separate local homes and routes Codex work through the account that has
+capacity.
 
-Codex Subscription Router creates a locally patched copy of the official
-ChatGPT app, balances new chats across connected subscriptions, and keeps every
-thread on one subscription so follow-up turns retain conversation context and
-benefit from account-level caching.
+The Windows install includes a small dashboard and an independently copied
+official Codex app. The dashboard is the setup and status surface; the copied
+app is the FLOW-branded desktop entry point that adds account connection to the
+Codex profile menu.
 
 The official ChatGPT installation is used only as build input and is never
 modified. This repository contains source code and build tooling—not OpenAI
@@ -29,11 +30,11 @@ binaries or a prebuilt application.
   to the same subscription unless that subscription is depleted.
 - **Automatic failover.** A depleted thread continues through another account
   with quota; if the whole pool is empty, the app shows one combined alert.
-- **Native account management.** The existing profile menu shows pooled usage,
-  profile photos, plan names, masked emails, and browser sign-in.
-- **Account-aware settings.** Profile statistics can be viewed together or per
-  subscription, while the Plugins page can switch Apps and MCP connections
-  between accounts.
+- **Native account management.** The FLOW profile menu has one **Add account**
+  action. It opens the OpenAI sign-in automatically and returns to FLOW when
+  the account is connected.
+- **Account-aware settings.** The dashboard shows only the usage, routing state,
+  and account actions needed to keep routing healthy.
 - **Per-account resets.** The native rate-limit sheet shows and consumes resets
   for the selected subscription.
 - **Working macOS integrations.** The copied Appshots and Computer Use helper is
@@ -81,10 +82,10 @@ Codex Subscription Router currently targets:
 | Node.js | 22.12 or newer |
 
 The Windows build targets the installed `OpenAI.Codex` package and Go 1.26+.
-It installs a per-user daemon, localhost subscription dashboard, and explicit
-app-server bridge. It leaves the protected Windows package unchanged and keeps
-router state under `%LOCALAPPDATA%\\Codex Subscription Router`. The official
-Windows GUI does not currently use this bridge; the dashboard says so directly.
+It installs a per-user daemon, localhost dashboard, explicit app-server bridge,
+and a copied FLOW app. The protected Windows Store package is used only as build
+input and is left unchanged. Router state stays under
+`%LOCALAPPDATA%\\Codex Subscription Router`.
 
 The patcher verifies the official version, build, ASAR hash, renderer anchors,
 and native binary constants before changing anything. An unknown upstream build
@@ -93,13 +94,14 @@ is rejected by default rather than being partially patched. See
 
 ## Requirements
 
-Choose the section for your platform. Windows does not require Node.js, Xcode,
-or an Apple signing identity.
+Choose the section for your platform. Windows does not require Xcode or an
+Apple signing identity.
 
 ### Windows
 
 - Windows x64 with the official Codex app installed
 - Go 1.26+
+- Node.js 22+ and npm
 - PowerShell 5.1+
 
 ### macOS
@@ -140,17 +142,22 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```
 
 This installs a versioned `codex-mux.exe`, starts one per-user daemon, registers
-launch at sign-in, and opens the subscription dashboard in your default
-browser. The dashboard connects subscriptions, shows short and weekly usage and
-reset times, and controls whether each subscription participates in routing.
-It does not modify the official package. Pass
+launch at sign-in, copies and patches an independent FLOW app, and opens the
+dashboard in your default browser. The dashboard connects accounts, shows
+short and weekly usage and reset times, and controls whether each account
+participates in routing. The protected official package is not modified. Pass
 `-OfficialExecutable C:\\path\\to\\ChatGPT.exe` or
 `-CodexExecutable C:\\path\\to\\codex.exe` when automatic discovery is not
 available.
 
-Two shortcuts are installed under
+The optional `-RouterAppRoot` parameter chooses where the independent FLOW app
+is copied. For example, use `-RouterAppRoot 'O:\\CodexRouter\\FLOW'` for a
+durable install location.
+
+Shortcuts are installed under
 `%LOCALAPPDATA%\\Codex Subscription Router`:
 
+- `FLOW.lnk` opens the FLOW desktop app.
 - `Open Subscription Router.cmd` starts or repairs the daemon and opens a fresh
   one-use dashboard URL.
 - `Codex Subscription Router.cmd` is the stdio bridge for a compatible Codex
@@ -158,7 +165,8 @@ Two shortcuts are installed under
 
 The install receipt includes package hashes, build identity, PID, and dynamic
 loopback address but never prints a credential or durable control token. The
-official Windows GUI build does not consume the bridge.
+official Store app remains unchanged; use FLOW when you want Codex traffic to
+use the connected account pool.
 
 > [!TIP]
 > To inspect the installer before running it, open
@@ -229,8 +237,12 @@ request Automation access the first time Computer Use controls another app.
 
 ### Windows
 
-The installer opens the local dashboard automatically. Select **Add account**,
-complete the ChatGPT browser sign-in, then add the next account. Existing
+The installer opens the local dashboard automatically. In the FLOW app profile
+menu or dashboard, select **Add account**. FLOW opens the OpenAI sign-in window
+for you and keeps a compact **Connecting to OpenAI** modal open while it waits.
+If the sign-in window is lost, choose **Open again**; when the router confirms
+the connection, FLOW closes the sign-in window and returns focus to the app.
+Then add the next account. Existing
 codex-lb users can open **Settings → Import from codex-lb**, export each account
 as Codex auth JSON, pause codex-lb routing for those accounts, and import all
 exports together. This is a one-time
@@ -355,8 +367,9 @@ latest completed run is recorded in
   because the upstream profile response exposes counts rather than skill IDs.
 - Generated app bundles are tied to one macOS user and signing team.
 - Releases are source-only; patched OpenAI binaries are never distributed.
-- The official Windows GUI does not currently route through the standalone
-  app-server bridge.
+- The protected official Windows Store app is intentionally unchanged and does
+  not route through the standalone bridge. Use the independent FLOW app for
+  pooled-account routing.
 
 ## Contributing and releases
 

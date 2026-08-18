@@ -21,7 +21,7 @@ function extractFunction(name) {
 const helper = extractFunction("requestFailureMessage");
 const context = vm.createContext({});
 vm.runInContext(`${helper}; this.message = requestFailureMessage;`, context);
-const expired = "Dashboard access expired. Open Codex Router again.";
+const expired = "Dashboard access expired. Open FLOW again.";
 assert.equal(context.message({ status: 401 }, "fallback"), expired);
 assert.equal(context.message({ status: 500 }, "fallback"), "fallback");
 

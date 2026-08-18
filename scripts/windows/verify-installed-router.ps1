@@ -76,9 +76,11 @@ Start-Sleep -Seconds 2
 $final = Assert-ExactRuntime
 $muxProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'codex-mux.exe'" | Where-Object {
     [string]$_.ExecutablePath -eq [string]$config.muxExecutable -and
-    [string]$_.CommandLine -match '(?:^|\s)daemon(?:\s|$)'
+    [string]$_.CommandLine -match '^\s*(?:"[^"]*codex-mux\.exe"|\S*codex-mux\.exe)\s+daemon(?:\s|$)'
 })
-if ($muxProcesses.Count -ne 1) { throw "Scheduled start left $($muxProcesses.Count) installed router daemons." }
+if ($muxProcesses.Count -ne 1) {
+    throw "Expected one Codex Router background service after scheduled startup, but found $($muxProcesses.Count). Rerun install.ps1 to repair startup, then verify again."
+}
 
 [pscustomobject]@{
     verified = $true

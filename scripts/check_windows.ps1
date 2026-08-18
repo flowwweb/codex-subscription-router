@@ -7,6 +7,8 @@ $files = @(
     (Join-Path $root "scripts\windows\start-router.ps1"),
     (Join-Path $root "scripts\windows\open-dashboard.ps1")
     (Join-Path $root "scripts\windows\connect-account.ps1")
+    (Join-Path $root "scripts\windows\launch-codex-router-app.ps1")
+    (Join-Path $root "scripts\windows\codex-router-protocol.ps1")
     (Join-Path $root "scripts\windows\publish-version.ps1")
     (Join-Path $root "scripts\windows\verify-installed-router.ps1")
 )
@@ -33,14 +35,27 @@ $installer = Get-Content -LiteralPath (Join-Path $root "install.ps1") -Raw
 $launcherScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\launch-router.ps1") -Raw
 $startScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\start-router.ps1") -Raw
 $dashboardScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\open-dashboard.ps1") -Raw
+$routerAppLauncherScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\launch-codex-router-app.ps1") -Raw
 $verifyScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\verify-installed-router.ps1") -Raw
-if ($verifyScript -notmatch "CommandLine -match '\(\?:\^\|\\s\)daemon") {
+if ($verifyScript -notmatch [regex]::Escape('CommandLine -match ''^\s*(?:"[^"]*codex-mux\.exe"|\S*codex-mux\.exe)\s+daemon(?:\s|$)''')) {
     throw "Installed verifier does not distinguish the daemon from account connection helpers"
+}
+if ($verifyScript -notmatch [regex]::Escape("Rerun install.ps1 to repair startup")) {
+    throw "Installed verifier daemon-count failure is not actionable"
+}
+$daemonPattern = '^\s*(?:"[^"]*codex-mux\.exe"|\S*codex-mux\.exe)\s+daemon(?:\s|$)'
+foreach ($case in @(
+    @{ Command = '"C:\Router\codex-mux.exe" daemon --control-port 0'; Expected = $true },
+    @{ Command = 'C:\Router\codex-mux.exe daemon'; Expected = $true },
+    @{ Command = '"C:\Router\codex-mux.exe" exec daemon'; Expected = $false },
+    @{ Command = '"C:\Router\codex-mux.exe" connect-account --account-id daemon'; Expected = $false }
+)) {
+    if (($case.Command -match $daemonPattern) -ne $case.Expected) { throw "Daemon command matcher misclassified: $($case.Command)" }
 }
 $connectScript = Get-Content -LiteralPath (Join-Path $root "scripts\windows\connect-account.ps1") -Raw
 $accountClient = Get-Content -LiteralPath (Join-Path $root "cmd\codex-mux\account_client.go") -Raw
 $routerSkill = Get-Content -LiteralPath (Join-Path $root "plugins\codex-router\skills\codex-router\SKILL.md") -Raw
-$contracts = "$installer`n$launcherScript`n$startScript`n$dashboardScript`n$connectScript"
+$contracts = "$installer`n$launcherScript`n$startScript`n$dashboardScript`n$connectScript`n$routerAppLauncherScript"
 foreach ($required in @(
     "codexBackendExecutable",
     "CODEX_MUX_REAL_CODEX",
@@ -65,12 +80,27 @@ foreach ($required in @(
     "connectScript"
     "connectLauncher"
     "connect-account"
+    "patch-codex-app.mjs"
+    "routerAppExecutable"
+    "routerAppAsarSha256"
+    "CODEX_ELECTRON_USER_DATA_PATH"
+    "URL Protocol"
+    "FLOW.lnk"
+    "flowwweb-icon.ico"
     "--new-account"
     "--account-id"
 )) {
     if ($contracts -notmatch [regex]::Escape($required)) {
         throw "Windows installer is missing required contract: $required"
     }
+}
+$patcher = Get-Content -LiteralPath (Join-Path $root "scripts\windows\patch-codex-app.mjs") -Raw
+foreach ($required in @("APPROVED_ASAR_SHA256", "WindowsApps", "native profile-menu seam changed", "codex.router.addAccount", "codex-router://connect", "patched ASAR header changed size")) {
+    if ($patcher -notmatch [regex]::Escape($required)) { throw "Native app patcher is missing fail-closed contract: $required" }
+}
+$protocol = Get-Content -LiteralPath (Join-Path $root "scripts\windows\codex-router-protocol.ps1") -Raw
+if ($protocol -notmatch [regex]::Escape('$Ignored') -or $protocol -match 'Invoke-Expression|Start-Process.*\$Ignored') {
+    throw "Router protocol handler must discard every untrusted URL argument"
 }
 
 foreach ($required in @(

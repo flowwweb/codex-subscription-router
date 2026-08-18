@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const state = { csrf: '', accounts: [], pending: new Map(), events: null, addKey: '', migrationReview: null, migrationInFlight: false, activeLoginAccountId: '' };
+  const state = { csrf: '', accounts: [], pending: new Map(), events: null, addKey: '', migrationReview: null, migrationInFlight: false, activeLoginAccountId: '', loginWindow: null };
   const $ = (selector) => document.querySelector(selector);
   const title = $('#status-title');
   const detail = $('#status-detail');
@@ -173,7 +173,7 @@
       login.hidden = account.connected && !needsRepair;
       login.textContent = state.pending.has(account.id) ? 'Signing in…' : (needsRepair ? 'Repair' : 'Connect');
       login.disabled = state.pending.has(account.id);
-      login.addEventListener('click', () => connectAccount(account.id));
+      login.addEventListener('click', () => connectAccount(account.id, openLoginWindow()));
       const remove = fragment.querySelector('.remove');
       remove.hidden = account.controller;
       remove.addEventListener('click', () => removeAccount(account));
@@ -201,7 +201,7 @@
     try { await api(`/v1/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(change) }); }
     catch (error) { announce(requestFailureMessage(error, 'This account could not be updated. Try again.'), true); return; }
     try { await loadAccounts(); }
-    catch (_) { render(); announce('Account updated. The account list could not refresh; reopen Codex Router.', true); }
+    catch (_) { render(); announce('Account updated. The account list could not refresh; reopen FLOW.', true); }
   }
 
   function renameAccount(account) {
@@ -210,7 +210,7 @@
   }
 
   function loginDetails(login) {
-    return { code: login?.userCode || '', uri: codexMuxTrustedBrowserLoginURL(login?.verificationUrl) };
+    return { uri: codexMuxTrustedBrowserLoginURL(login?.verificationUrl) };
   }
 
   function codexMuxTrustedBrowserLoginURL(value) {
@@ -231,26 +231,37 @@
     }
   }
 
-  function showLogin(accountId, code, uri) {
+  function openLoginWindow() {
+    const popup = window.open('', 'flow-openai-connect', 'popup,width=560,height=760');
+    if (popup) {
+      popup.document.title = 'FLOW';
+      popup.document.body.innerHTML = '<main style="min-height:100vh;display:grid;place-items:center;margin:0;background:#090a0d;color:#f5f5f7;font:16px system-ui">Opening OpenAI…</main>';
+    }
+    return popup;
+  }
+
+  function showLogin(accountId, uri, popup) {
     state.activeLoginAccountId = accountId;
-    $('#login-code').textContent = code || '';
-    $('#login-code').hidden = !code;
-    $('#login-instruction').textContent = code ? 'Open ChatGPT and enter this code.' : 'Finish sign-in in the ChatGPT window.';
+    state.loginWindow = popup || null;
     const link = $('#login-link');
     link.hidden = !uri;
     if (!link.hidden) link.href = uri;
-    $('#login-status').textContent = 'Waiting for confirmation…';
+    $('#login-status').textContent = 'Waiting for approval…';
     if (!loginDialog.open) loginDialog.showModal();
     loginDialog.focus();
+    if (uri && popup && !popup.closed) popup.location.replace(uri);
   }
 
-  function closeLoginDialog() {
+  function closeLoginDialog(closePopup = false) {
+    if (closePopup && state.loginWindow && !state.loginWindow.closed) state.loginWindow.close();
+    state.loginWindow = null;
     state.activeLoginAccountId = '';
     if (loginDialog.open) loginDialog.close();
+    window.focus();
   }
 
   function requestFailureMessage(error, fallback) {
-    if (error?.status === 401) return 'Dashboard access expired. Open Codex Router again.';
+    if (error?.status === 401) return 'Dashboard access expired. Open FLOW again.';
     return fallback;
   }
 
@@ -265,7 +276,7 @@
     return 'This account did not connect. Try connecting again.';
   }
 
-  async function connectAccount(id) {
+  async function connectAccount(id, popup = null) {
     if (state.pending.has(id)) return true;
     const idempotencyKey = requestKey();
     state.pending.set(id, { id: '', key: idempotencyKey }); render();
@@ -273,10 +284,11 @@
       const result = await api(`/v1/accounts/${encodeURIComponent(id)}/login`, { method: 'POST', body: JSON.stringify({ mode: 'chatgpt', idempotencyKey }) });
       state.pending.set(id, { id: result.attempt.id, key: idempotencyKey });
       const info = loginDetails(result.login || result.attempt?.result);
-      showLogin(id, info.code, info.uri);
+      showLogin(id, info.uri, popup);
       watchLogin(id, result.attempt.id);
       return true;
     } catch (error) {
+      if (popup && !popup.closed) popup.close();
       state.pending.delete(id); closeLoginDialog(); render(); announce(loginFailureMessage(error), true);
       return false;
     }
@@ -292,18 +304,17 @@
       if (!current || current.id !== attemptId) return;
       const attempt = result.attempt;
       if (attempt.state === 'pending') { setTimeout(() => watchLogin(accountId, attemptId), 1500); return; }
-      state.pending.delete(accountId); closeLoginDialog();
+      state.pending.delete(accountId); closeLoginDialog(true);
       const terminalMessage = attempt.state === 'succeeded'
         ? 'Account connected and ready.'
         : loginFailureMessage(attempt.error, attempt.state);
       const terminalIsError = attempt.state !== 'succeeded' && attempt.state !== 'cancelled';
-      announce(terminalMessage, terminalIsError);
       try {
         await loadAccounts();
         announce(terminalMessage, terminalIsError);
       } catch (_) {
         render();
-        announce(`${terminalMessage} The account list could not refresh; reopen Codex Router.`, true);
+        announce(`${terminalMessage} The account list could not refresh; reopen FLOW.`, true);
       }
     } catch (error) {
       const current = state.pending.get(accountId);
@@ -316,13 +327,13 @@
   async function cancelActiveLogin() {
     const accountId = state.activeLoginAccountId;
     const pending = state.pending.get(accountId);
-    if (!pending) return closeLoginDialog();
+    if (!pending) return closeLoginDialog(true);
     if (!pending.id) return;
     try {
       await api(`/v1/login-attempts/${encodeURIComponent(pending.id)}/cancel`, { method: 'POST', body: '{}' });
-      state.pending.delete(accountId); closeLoginDialog(); announce('Sign-in cancelled.');
+      state.pending.delete(accountId); closeLoginDialog(true); announce('Sign-in cancelled.');
       try { await loadAccounts(); announce('Sign-in cancelled.'); }
-      catch (_) { render(); announce('Sign-in cancelled. The account list could not refresh; reopen Codex Router.', true); }
+      catch (_) { render(); announce('Sign-in cancelled. The account list could not refresh; reopen FLOW.', true); }
     } catch (error) { announce(requestFailureMessage(error, 'Sign-in could not be cancelled. Try again.'), true); }
   }
 
@@ -332,22 +343,24 @@
       await api(`/v1/accounts/${encodeURIComponent(account.id)}`, { method: 'DELETE' });
       announce('Account removed. Its local data was archived for recovery.');
       try { await loadAccounts(); }
-      catch (_) { render(); announce('Account removed. The account list could not refresh; reopen Codex Router.', true); }
+      catch (_) { render(); announce('Account removed. The account list could not refresh; reopen FLOW.', true); }
       notice.focus();
     } catch (error) { announce(requestFailureMessage(error, 'This account could not be removed. Try again.'), true); }
   }
 
-  async function addOrConnect() {
+  async function addOrConnect(popup = null) {
     try {
       state.addKey ||= requestKey();
       const result = await api('/v1/accounts', { method: 'POST', body: JSON.stringify({ label: `Account ${state.accounts.length + 1}`, idempotencyKey: state.addKey }) });
-      announce('Account added.');
       let reconciled = false;
       try { await loadAccounts(); reconciled = true; }
-      catch (_) { render(); announce('Account added. The account list could not refresh; continuing to sign-in.', true); }
-      const loginStarted = await connectAccount(result.account.id);
+      catch (_) { render(); }
+      const loginStarted = await connectAccount(result.account.id, popup);
       if (reconciled || loginStarted) state.addKey = '';
-    } catch (error) { announce(requestFailureMessage(error, 'A new account could not be added. Try again.'), true); }
+    } catch (error) {
+      if (popup && !popup.closed) popup.close();
+      announce(requestFailureMessage(error, 'A new account could not be added. Try again.'), true);
+    }
   }
 
   function migrationSignature(files) { return files.map((file) => `${file.name}:${file.size}:${file.lastModified}`).join('|'); }
@@ -412,12 +425,12 @@
     state.migrationInFlight = false; state.migrationReview = null; button.disabled = false; button.textContent = 'Review import';
     $('#migration-preview').hidden = true;
     try { await loadAccounts(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported.`, false, true); }
-    catch (_) { render(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported. The account list could not refresh; reopen Codex Router.`, true, true); }
+    catch (_) { render(); announce(`${imported} ${imported === 1 ? 'account' : 'accounts'} imported. The account list could not refresh; reopen FLOW.`, true, true); }
   }
 
   function setOffline(error) {
     setHealth('Offline', 'offline'); title.textContent = 'Router is offline';
-    detail.textContent = 'Your accounts are safe. Start Codex Router, then reload this page.';
+    detail.textContent = 'Your accounts are safe. Start FLOW, then reload this page.';
     accountsNode.setAttribute('aria-busy', 'false'); announce(error ? `Couldn’t reach the router. ${error.message}` : 'Couldn’t reach the router.', true);
   }
 
@@ -438,7 +451,7 @@
     } catch (error) { setOffline(error); }
   }
 
-  document.querySelectorAll('[data-connect]').forEach((button) => button.addEventListener('click', addOrConnect));
+  document.querySelectorAll('[data-connect]').forEach((button) => button.addEventListener('click', () => addOrConnect(openLoginWindow())));
   $('#open-settings').addEventListener('click', () => { settingsDialog.showModal(); settingsDialog.focus(); });
   $('#close-settings').addEventListener('click', () => settingsDialog.close());
   $('#close-login').addEventListener('click', cancelActiveLogin);
