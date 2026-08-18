@@ -376,7 +376,15 @@ if ($beforeAsarHash -ne $afterAsarHash -or $beforeCodexHash -ne $afterCodexHash)
 }
 $configTemporary = $configPath + ".new"
 $config | ConvertTo-Json | Set-Content -LiteralPath $configTemporary -Encoding UTF8
-Move-Item -LiteralPath $configTemporary -Destination $configPath -Force
+try {
+    # Copying over a live config preserves the previous file when Windows has
+    # an open reader; Move-Item can delete the destination before reporting
+    # that same sharing violation.
+    Copy-Item -LiteralPath $configTemporary -Destination $configPath -Force
+    Remove-Item -LiteralPath $configTemporary -Force -ErrorAction SilentlyContinue
+} catch {
+    Fail "router configuration could not be published without risking the previous file: $($_.Exception.Message)"
+}
 Set-PrivateStateAcl $stateRoot
 if ($primaryRequiresAclMigration) {
     Set-PrivateStateAcl $primaryCodexHome

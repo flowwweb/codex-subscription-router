@@ -84,6 +84,7 @@ foreach ($required in @(
     "routerAppExecutable"
     "routerAppAsarSha256"
     "CODEX_ELECTRON_USER_DATA_PATH"
+    "--user-data-dir="
     "URL Protocol"
     "FLOW.lnk"
     "flowwweb-icon.ico"
@@ -93,6 +94,10 @@ foreach ($required in @(
     if ($contracts -notmatch [regex]::Escape($required)) {
         throw "Windows installer is missing required contract: $required"
     }
+}
+if ($installer -notmatch [regex]::Escape('Copy-Item -LiteralPath $configTemporary -Destination $configPath -Force') -or
+    $installer -match [regex]::Escape('Move-Item -LiteralPath $configTemporary -Destination $configPath -Force')) {
+    throw "Windows installer must publish router-config.json without the destructive Move-Item replacement"
 }
 $patcher = Get-Content -LiteralPath (Join-Path $root "scripts\windows\patch-codex-app.mjs") -Raw
 foreach ($required in @("APPROVED_ASAR_SHA256", "WindowsApps", "native profile-menu seam changed", "codex.router.addAccount", "codex-router://connect", "patched ASAR header changed size")) {

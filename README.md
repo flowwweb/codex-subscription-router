@@ -150,6 +150,9 @@ participates in routing. The protected official package is not modified. Pass
 `-CodexExecutable C:\\path\\to\\codex.exe` when automatic discovery is not
 available.
 
+FLOW launches with its own Electron user-data directory, so it can run beside
+the official Store app without sharing its single-instance lock or profile.
+
 The optional `-RouterAppRoot` parameter chooses where the independent FLOW app
 is copied. For example, use `-RouterAppRoot 'O:\\CodexRouter\\FLOW'` for a
 durable install location.

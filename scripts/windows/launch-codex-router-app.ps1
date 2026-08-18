@@ -19,6 +19,7 @@ if ((Get-FileHash -LiteralPath $asarPath -Algorithm SHA256).Hash -ne [string]$co
 $start = New-Object System.Diagnostics.ProcessStartInfo
 $start.FileName = [string]$config.routerAppExecutable
 $start.WorkingDirectory = Split-Path -Parent $config.routerAppExecutable
+$start.Arguments = '--user-data-dir="{0}"' -f ([string]$config.routerAppUserData)
 $start.UseShellExecute = $false
 $start.Environment["CODEX_ELECTRON_USER_DATA_PATH"] = [string]$config.routerAppUserData
 $start.Environment["CODEX_MUX_HOME"] = [string]$config.stateRoot
