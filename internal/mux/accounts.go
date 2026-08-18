@@ -83,22 +83,28 @@ type RateLimits struct {
 	RateLimitReachedType any              `json:"rateLimitReachedType"`
 }
 
+type ResetCreditSummary struct {
+	AvailableCount int    `json:"availableCount"`
+	EarliestExpiry *int64 `json:"earliestExpiry,omitempty"`
+}
+
 type AccountSnapshot struct {
-	ID              string          `json:"id"`
-	Label           string          `json:"label"`
-	Enabled         bool            `json:"enabled"`
-	Controller      bool            `json:"controller"`
-	Connected       bool            `json:"connected"`
-	Email           string          `json:"email,omitempty"`
-	PlanType        string          `json:"planType,omitempty"`
-	PlanLabel       string          `json:"planLabel,omitempty"`
-	AuthType        string          `json:"authType,omitempty"`
-	ProfileImageURL string          `json:"profileImageUrl,omitempty"`
-	RateLimits      *RateLimits     `json:"rateLimits,omitempty"`
-	ThreadCount     int             `json:"threadCount"`
-	Error           string          `json:"error,omitempty"`
-	CreatedAt       int64           `json:"createdAt"`
-	RawAccount      json.RawMessage `json:"-"`
+	ID              string              `json:"id"`
+	Label           string              `json:"label"`
+	Enabled         bool                `json:"enabled"`
+	Controller      bool                `json:"controller"`
+	Connected       bool                `json:"connected"`
+	Email           string              `json:"email,omitempty"`
+	PlanType        string              `json:"planType,omitempty"`
+	PlanLabel       string              `json:"planLabel,omitempty"`
+	AuthType        string              `json:"authType,omitempty"`
+	ProfileImageURL string              `json:"profileImageUrl,omitempty"`
+	RateLimits      *RateLimits         `json:"rateLimits,omitempty"`
+	ResetCredits    *ResetCreditSummary `json:"resetCredits,omitempty"`
+	ThreadCount     int                 `json:"threadCount"`
+	Error           string              `json:"error,omitempty"`
+	CreatedAt       int64               `json:"createdAt"`
+	RawAccount      json.RawMessage     `json:"-"`
 }
 
 type RouteReason struct {
@@ -723,6 +729,10 @@ func (m *Multiplexer) accountSnapshotWithProfile(ctx context.Context, accountID 
 	if !ok {
 		if !account.Enabled {
 			email := account.LastKnownEmail
+			authType := ""
+			if _, authErr := readAuthFile(filepath.Join(account.CodexHome, "auth.json")); authErr == nil {
+				authType = "chatgpt"
+			}
 			if email == "" {
 				email = accountEmailFromAuth(filepath.Join(account.CodexHome, "auth.json"))
 				if email != "" {
@@ -732,6 +742,7 @@ func (m *Multiplexer) accountSnapshotWithProfile(ctx context.Context, accountID 
 			return AccountSnapshot{
 				ID: account.ID, Label: account.Label, Enabled: false, Connected: account.LastKnownConnected,
 				Email: email, PlanType: account.LastKnownPlanType, PlanLabel: planLabel(account.LastKnownPlanType),
+				AuthType:   authType,
 				Controller: account.Controller, CreatedAt: account.CreatedAt,
 				ThreadCount: m.store.ThreadCounts()[account.ID],
 			}, nil
@@ -798,6 +809,13 @@ func (m *Multiplexer) accountSnapshotFromChild(ctx context.Context, account stat
 				}
 				if json.Unmarshal(rateResponse.Result, &rateResult) == nil {
 					snapshot.RateLimits = &rateResult.RateLimits
+				}
+			}
+			resetCredits := m.routingResetCredits(ctx, account)
+			if resetCredits.Known {
+				snapshot.ResetCredits = &ResetCreditSummary{
+					AvailableCount: resetCredits.AvailableCount,
+					EarliestExpiry: resetCredits.EarliestExpiry,
 				}
 			}
 		}

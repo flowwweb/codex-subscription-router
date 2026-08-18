@@ -21,6 +21,8 @@ import (
 
 var ErrAlreadyRunning = errors.New("router daemon is already running")
 
+const stableControlAddress = "127.0.0.1:48123"
+
 type Owner struct {
 	root            string
 	lease           *lease
@@ -35,6 +37,16 @@ type Owner struct {
 }
 
 func Acquire(root, build string) (*Owner, error) {
+	return acquireWithControlAddress(root, build, stableControlAddress)
+}
+
+// AcquireForTest keeps package tests isolated from the production control
+// endpoint and from an installed router that may already own it.
+func AcquireForTest(root, build string) (*Owner, error) {
+	return acquireWithControlAddress(root, build, "127.0.0.1:0")
+}
+
+func acquireWithControlAddress(root, build, controlAddress string) (*Owner, error) {
 	if build == "" {
 		build = "dev"
 	}
@@ -57,9 +69,12 @@ func Acquire(root, build string) (*Owner, error) {
 	if err != nil {
 		return closeOnError(fmt.Errorf("bind readiness listener: %w", err))
 	}
-	owner.controlListener, err = net.Listen("tcp", "127.0.0.1:0")
+	owner.controlListener, err = net.Listen("tcp", controlAddress)
 	if err != nil {
-		return closeOnError(fmt.Errorf("bind control listener: %w", err))
+		if controlAddress == stableControlAddress {
+			return closeOnError(fmt.Errorf("bind stable control listener on %s: %w", controlAddress, err))
+		}
+		return closeOnError(fmt.Errorf("bind control listener on %s: %w", controlAddress, err))
 	}
 	owner.bridgeListener, err = net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

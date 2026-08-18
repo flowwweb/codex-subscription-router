@@ -18,13 +18,13 @@ import (
 
 func TestAcquireRejectsDuplicateOwner(t *testing.T) {
 	root := t.TempDir()
-	first, err := Acquire(root, "test-build")
+	first, err := AcquireForTest(root, "test-build")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
 
-	second, err := Acquire(root, "test-build")
+	second, err := AcquireForTest(root, "test-build")
 	if second != nil {
 		_ = second.Close()
 		t.Fatal("duplicate runtime owner unexpectedly acquired the lease")
@@ -36,7 +36,7 @@ func TestAcquireRejectsDuplicateOwner(t *testing.T) {
 
 func TestAcquireRejectsOwnerInAnotherProcess(t *testing.T) {
 	if os.Getenv("CODEX_MUX_OWNER_HELPER") == "1" {
-		owner, err := Acquire(os.Getenv("CODEX_MUX_OWNER_ROOT"), "helper-build")
+		owner, err := AcquireForTest(os.Getenv("CODEX_MUX_OWNER_ROOT"), "helper-build")
 		if err != nil {
 			os.Exit(2)
 		}
@@ -64,7 +64,7 @@ func TestAcquireRejectsOwnerInAnotherProcess(t *testing.T) {
 		t.Fatal("helper process did not acquire the runtime owner lease")
 	}
 
-	owner, err := Acquire(root, "parent-build")
+	owner, err := AcquireForTest(root, "parent-build")
 	if owner != nil {
 		_ = owner.Close()
 		t.Fatal("parent unexpectedly acquired a lease held by another process")
@@ -74,9 +74,32 @@ func TestAcquireRejectsOwnerInAnotherProcess(t *testing.T) {
 	}
 }
 
-func TestOwnerPublishesDynamicExactEndpointAndCleansUp(t *testing.T) {
+func TestAcquireFailsClosedWhenControlPortIsOccupied(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+
+	owner, err := acquireWithControlAddress(t.TempDir(), "test-build", occupied.Addr().String())
+	if owner != nil {
+		_ = owner.Close()
+		t.Fatal("router acquired ownership despite an occupied control port")
+	}
+	if err == nil || !strings.Contains(err.Error(), "bind control listener") {
+		t.Fatalf("occupied control port error = %v", err)
+	}
+}
+
+func TestStableControlAddressContract(t *testing.T) {
+	if stableControlAddress != "127.0.0.1:48123" {
+		t.Fatalf("stable control address = %q", stableControlAddress)
+	}
+}
+
+func TestOwnerPublishesLoopbackExactEndpointsAndCleansUp(t *testing.T) {
 	root := t.TempDir()
-	owner, err := Acquire(root, "test-build")
+	owner, err := AcquireForTest(root, "test-build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,11 +108,7 @@ func TestOwnerPublishesDynamicExactEndpointAndCleansUp(t *testing.T) {
 	seen := make(map[string]struct{})
 	for _, address := range addresses {
 		if err := validateLoopbackAddress(address); err != nil {
-			t.Fatalf("address %q is not dynamic loopback: %v", address, err)
-		}
-		_, port, _ := net.SplitHostPort(address)
-		if port == "48123" {
-			t.Fatalf("address %q reused the retired fixed port", address)
+			t.Fatalf("address %q is not loopback: %v", address, err)
 		}
 		if _, duplicate := seen[address]; duplicate {
 			t.Fatalf("listeners unexpectedly share address %q", address)
@@ -129,7 +148,7 @@ func TestOwnerPublishesDynamicExactEndpointAndCleansUp(t *testing.T) {
 
 func TestDashboardURLRequiresAuthenticationAndIsFresh(t *testing.T) {
 	root := t.TempDir()
-	owner, err := Acquire(root, "test-build")
+	owner, err := AcquireForTest(root, "test-build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +208,7 @@ func TestDashboardURLRequiresAuthenticationAndIsFresh(t *testing.T) {
 }
 
 func TestAuthenticatedBridgeRelaysProtocolLines(t *testing.T) {
-	owner, err := Acquire(t.TempDir(), "test-build")
+	owner, err := AcquireForTest(t.TempDir(), "test-build")
 	if err != nil {
 		t.Fatal(err)
 	}

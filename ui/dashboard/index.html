@@ -50,14 +50,15 @@
         <h1 id="status-title">Loading your accounts…</h1>
         <p id="status-detail">Checking connection and usage.</p>
       </div>
+      <button id="open-stats" class="quiet stats-trigger" type="button" disabled>Usage stats</button>
     </section>
     <section class="accounts-section" aria-labelledby="accounts-title">
       <div class="section-heading">
         <h2 id="accounts-title">Accounts</h2>
-        <label class="sort-control" for="account-sort">
+        <label class="sort-control" for="account-sort" hidden>
           <span class="sr-only">Sort accounts</span>
           <select id="account-sort" aria-label="Sort accounts">
-            <option value="best">Best for routing</option>
+            <option value="best">Recommended</option>
             <option value="usage">Most used</option>
             <option value="available">Most available</option>
             <option value="name">Name</option>
@@ -96,6 +97,20 @@
     <button id="cancel-login" class="text-action full-width" type="button">Cancel sign-in</button>
   </dialog>
 
+  <dialog id="stats-dialog" class="dialog stats-dialog" aria-labelledby="stats-title" tabindex="-1">
+    <div class="dialog-head">
+      <div>
+        <span class="dialog-kicker">Usage stats</span>
+        <h2 id="stats-title">Account activity</h2>
+      </div>
+      <button id="close-stats" class="icon-button" type="button" aria-label="Close usage stats"><svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-x"></use></svg></button>
+    </div>
+    <p class="stats-source">Read-only OpenAI profile stats. No Codex turn is started.</p>
+    <div id="stats-content" class="stats-content" aria-live="polite">
+      <div class="stats-loading"><span class="spinner" aria-hidden="true"></span><span>Loading stats…</span></div>
+    </div>
+  </dialog>
+
   <dialog id="remove-account-dialog" class="dialog confirm-dialog" aria-labelledby="remove-account-title" aria-describedby="remove-account-copy" tabindex="-1">
     <div class="dialog-head">
       <div>
@@ -128,7 +143,7 @@
       </label>
       <label class="setting-toggle">
         <input id="hide-account-emails" type="checkbox">
-        <span><strong>Hide email addresses</strong><small>Mask account emails on this screen.</small></span>
+        <span><strong>Mask email addresses</strong><small>Mask account emails in this browser.</small></span>
       </label>
     </section>
     <section class="settings-section" aria-labelledby="migration-title">
@@ -157,7 +172,7 @@
     <article class="account-row">
       <div class="account-identity-block">
         <div class="account-title-line">
-          <h3 class="account-name"></h3>
+          <h3><button class="account-details-trigger" type="button"><span class="account-name"></span></button></h3>
           <span class="account-plan" hidden></span>
           <span class="account-state">
             <svg class="state-icon icon" data-state-icon="pause" aria-hidden="true" viewBox="0 0 24 24" hidden><use href="#icon-pause"></use></svg>
@@ -167,6 +182,7 @@
           </span>
         </div>
         <p class="account-identity"></p>
+        <div class="activity-strip" hidden></div>
       </div>
       <div class="usage"></div>
       <div class="account-controls">
@@ -178,21 +194,21 @@
           <summary class="account-menu-trigger" aria-label="Account actions" title="Account actions">
             <svg class="action-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-sliders-horizontal"></use></svg>
           </summary>
-          <div class="account-menu-panel" role="menu">
-            <button class="refresh-account menu-action" type="button" role="menuitem">
+          <div class="account-menu-panel">
+            <button class="refresh-account menu-action" type="button">
               <svg class="action-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-refresh-cw"></use></svg>
               <span>Refresh usage</span>
             </button>
-            <button class="toggle-account menu-action" type="button" role="menuitem">
+            <button class="toggle-account menu-action" type="button">
               <svg class="action-icon icon" data-toggle-icon="pause" aria-hidden="true" viewBox="0 0 24 24" hidden><use href="#icon-pause"></use></svg>
               <svg class="action-icon icon" data-toggle-icon="play" aria-hidden="true" viewBox="0 0 24 24" hidden><use href="#icon-play"></use></svg>
               <span class="toggle-copy">Pause routing</span>
             </button>
-            <button class="rename menu-action" type="button" role="menuitem">
+            <button class="rename menu-action" type="button">
               <svg class="action-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-pen-line"></use></svg>
               <span>Rename</span>
             </button>
-            <button class="remove menu-action danger" type="button" role="menuitem" hidden>
+            <button class="remove menu-action danger" type="button" hidden>
               <svg class="action-icon icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#icon-trash-2"></use></svg>
               <span>Remove</span>
             </button>

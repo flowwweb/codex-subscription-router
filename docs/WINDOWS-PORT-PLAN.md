@@ -8,7 +8,7 @@ official Codex/ChatGPT package, while preserving the existing macOS patcher.
 ## Chosen boundary
 
 The Windows installer builds a versioned user-local `codex-mux.exe`. One
-per-user daemon owns account state, Codex children, a dynamic localhost
+per-user daemon owns account state, Codex children, a stable `127.0.0.1:48123`
 dashboard, and an authenticated stdio bridge. The bridge forwards compatible
 app-server stdio to the daemon; it never starts a competing account pool. The
 launcher sets `CODEX_MUX_HOME` and `CODEX_HOME` to independent user-local state

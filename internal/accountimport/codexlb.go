@@ -57,13 +57,9 @@ func ImportCodexLBExport(accountHome string, raw []byte, options Options) (Resul
 	if err != nil {
 		return Result{}, err
 	}
-	var auth codexAuth
-	if err := json.Unmarshal(canonical, &auth); err != nil {
-		return Result{}, errors.New("codex-lb export does not contain valid Codex auth")
-	}
-	if auth.AuthMode != "chatgpt" || auth.Tokens.IDToken == "" || auth.Tokens.AccessToken == "" ||
-		auth.Tokens.RefreshToken == "" || auth.Tokens.AccountID == "" || auth.LastRefresh == "" {
-		return Result{}, errors.New("codex-lb export is missing required Codex auth fields")
+	auth, err := parseCodexAuth(canonical)
+	if err != nil {
+		return Result{}, err
 	}
 
 	if err := os.MkdirAll(accountHome, 0o700); err != nil {
@@ -115,6 +111,23 @@ func ImportCodexLBExport(accountHome string, raw []byte, options Options) (Resul
 	return Result{AccountID: auth.Tokens.AccountID, BackupPath: backupPath}, nil
 }
 
+// CodexLBAccountID validates an export without writing it. The router uses
+// this before mutation so the same credential cannot be imported twice.
+func CodexLBAccountID(raw []byte) (string, error) {
+	if len(raw) == 0 || len(raw) > maxExportBytes {
+		return "", errors.New("codex-lb export is empty or too large")
+	}
+	canonical, err := canonicalAuth(raw)
+	if err != nil {
+		return "", err
+	}
+	auth, err := parseCodexAuth(canonical)
+	if err != nil {
+		return "", err
+	}
+	return auth.Tokens.AccountID, nil
+}
+
 // RollbackCodexLBImport restores the pre-migration credential, or removes the
 // newly installed credential when no prior auth file existed. Backups are kept
 // so the recovery remains inspectable and repeatable.
@@ -158,6 +171,18 @@ func canonicalAuth(raw []byte) ([]byte, error) {
 	default:
 		return raw, nil
 	}
+}
+
+func parseCodexAuth(canonical []byte) (codexAuth, error) {
+	var auth codexAuth
+	if err := json.Unmarshal(canonical, &auth); err != nil {
+		return codexAuth{}, errors.New("codex-lb export does not contain valid Codex auth")
+	}
+	if auth.AuthMode != "chatgpt" || auth.Tokens.IDToken == "" || auth.Tokens.AccessToken == "" ||
+		auth.Tokens.RefreshToken == "" || auth.Tokens.AccountID == "" || auth.LastRefresh == "" {
+		return codexAuth{}, errors.New("codex-lb export is missing required Codex auth fields")
+	}
+	return auth, nil
 }
 
 func replaceWithBackup(target, temporary string) (string, error) {

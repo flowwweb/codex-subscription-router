@@ -101,6 +101,9 @@ type Multiplexer struct {
 	profileCache  map[string]profileCacheEntry
 	now           func() time.Time
 
+	profileStatsMu    sync.Mutex
+	profileStatsCache map[string]profileStatsCacheEntry
+
 	resetCreditsMu       sync.Mutex
 	resetCreditsCache    map[string]resetCreditsCacheEntry
 	resetCreditsEndpoint string
@@ -117,6 +120,8 @@ type Multiplexer struct {
 	loginReady        map[string]chan struct{}
 	loginByProviderID map[string]string
 	loginSequence     atomic.Uint64
+
+	importMu sync.Mutex
 }
 
 func New(options Options) (*Multiplexer, error) {
@@ -143,6 +148,7 @@ func New(options Options) (*Multiplexer, error) {
 		profileClient:        &http.Client{Timeout: 10 * time.Second},
 		profileCache:         make(map[string]profileCacheEntry),
 		now:                  time.Now,
+		profileStatsCache:    make(map[string]profileStatsCacheEntry),
 		resetCreditsCache:    make(map[string]resetCreditsCacheEntry),
 		resetCreditsEndpoint: rateLimitResetCreditsURL,
 		resetPreviews:        make(map[string]ResetCreditsPreview),
