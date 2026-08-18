@@ -14,6 +14,9 @@ var JS []byte
 //go:embed flowwweb-icon.png
 var Icon []byte
 
+//go:embed flow-wordmark.png
+var Wordmark []byte
+
 func Asset(name string) ([]byte, string, bool) {
 	switch name {
 	case "app.css":
@@ -22,6 +25,8 @@ func Asset(name string) ([]byte, string, bool) {
 		return JS, "text/javascript; charset=utf-8", true
 	case "flowwweb-icon.png":
 		return Icon, "image/png", true
+	case "flow-wordmark.png":
+		return Wordmark, "image/png", true
 	default:
 		return nil, "", false
 	}

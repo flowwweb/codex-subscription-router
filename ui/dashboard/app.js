@@ -183,12 +183,12 @@
       const fragment = $('#account-template').content.cloneNode(true);
       const card = fragment.querySelector('.account-row'); card.dataset.accountId = account.id;
       const customLabel = account.label && !/^Account \d+$/.test(account.label) ? account.label : '';
-      fragment.querySelector('.account-name').textContent = account.email || customLabel || (account.connected ? 'Connected account' : 'OpenAI account');
+      fragment.querySelector('.account-name').textContent = account.email || customLabel || 'OpenAI account';
       const plan = fragment.querySelector('.account-plan');
       plan.textContent = account.planLabel || '';
       plan.hidden = !account.planLabel;
       fragment.querySelector('.account-identity').textContent = account.connected
-        ? (account.controller ? 'Primary account' : 'Ready to route')
+        ? (!account.enabled ? 'Routing paused' : (account.controller ? 'Primary account' : 'Ready to route'))
         : (account.error || 'Not connected');
       const status = accountStatus(account);
       const statusNode = fragment.querySelector('.account-state'); statusNode.textContent = status.label; if (status.className) statusNode.classList.add(status.className);

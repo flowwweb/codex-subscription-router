@@ -273,3 +273,23 @@ func TestUpdateAccountPreservesController(t *testing.T) {
 		t.Fatalf("unexpected updated account: %#v", account)
 	}
 }
+
+func TestSetAccountIdentityPersistsNonSecretMetadata(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	primary := filepath.Join(t.TempDir(), "primary")
+	store, err := Open(root, primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetAccountIdentity("primary", "person@example.com", "plus"); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(root, primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, ok := reopened.Account("primary")
+	if !ok || account.LastKnownEmail != "person@example.com" || account.LastKnownPlanType != "plus" {
+		t.Fatalf("identity metadata was not persisted: %#v, %v", account, ok)
+	}
+}

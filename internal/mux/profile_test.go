@@ -2,12 +2,26 @@ package mux
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestAuthEmailReadsIDTokenClaim(t *testing.T) {
+	payload, err := json.Marshal(map[string]string{"email": "person@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials := authFile{}
+	credentials.Tokens.IDToken = "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+	if got := authEmail(credentials); got != "person@example.com" {
+		t.Fatalf("auth email = %q", got)
+	}
+}
 
 func TestFetchProfileImageURL(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

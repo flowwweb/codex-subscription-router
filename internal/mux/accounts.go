@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -123,7 +124,10 @@ func (m *Multiplexer) accountSnapshots(ctx context.Context, includeProfile bool)
 			if err != nil {
 				snapshot = AccountSnapshot{
 					ID: account.ID, Label: account.Label, Enabled: account.Enabled,
-					Controller: account.Controller, CreatedAt: account.CreatedAt, Error: err.Error(),
+					Controller: account.Controller, CreatedAt: account.CreatedAt,
+					Connected: account.LastKnownConnected, Email: account.LastKnownEmail,
+					PlanType: account.LastKnownPlanType, PlanLabel: planLabel(account.LastKnownPlanType),
+					Error: err.Error(),
 				}
 			}
 			results <- snapshot
@@ -718,8 +722,16 @@ func (m *Multiplexer) accountSnapshotWithProfile(ctx context.Context, accountID 
 	child, ok := m.child(accountID)
 	if !ok {
 		if !account.Enabled {
+			email := account.LastKnownEmail
+			if email == "" {
+				email = accountEmailFromAuth(filepath.Join(account.CodexHome, "auth.json"))
+				if email != "" {
+					_ = m.store.SetAccountIdentity(account.ID, email, account.LastKnownPlanType)
+				}
+			}
 			return AccountSnapshot{
 				ID: account.ID, Label: account.Label, Enabled: false, Connected: account.LastKnownConnected,
+				Email: email, PlanType: account.LastKnownPlanType, PlanLabel: planLabel(account.LastKnownPlanType),
 				Controller: account.Controller, CreatedAt: account.CreatedAt,
 				ThreadCount: m.store.ThreadCounts()[account.ID],
 			}, nil
@@ -749,6 +761,8 @@ func (m *Multiplexer) accountSnapshotFromChild(ctx context.Context, account stat
 	snapshot := AccountSnapshot{
 		ID: account.ID, Label: account.Label, Enabled: account.Enabled,
 		Controller: account.Controller, Connected: string(accountResult.Account) != "null" && len(accountResult.Account) > 0,
+		Email: account.LastKnownEmail, PlanType: account.LastKnownPlanType,
+		PlanLabel: planLabel(account.LastKnownPlanType),
 		CreatedAt: account.CreatedAt, RawAccount: accountResult.Account,
 		ThreadCount: m.store.ThreadCounts()[account.ID],
 	}
@@ -766,6 +780,9 @@ func (m *Multiplexer) accountSnapshotFromChild(ctx context.Context, account stat
 		snapshot.Email = details.Email
 		snapshot.PlanType = details.PlanType
 		snapshot.PlanLabel = planLabel(details.PlanType)
+		if details.Email != "" || details.PlanType != "" {
+			_ = m.store.SetAccountIdentity(account.ID, details.Email, details.PlanType)
+		}
 		if includeProfile {
 			snapshot.ProfileImageURL = m.profileImageURL(ctx, account)
 		}

@@ -22,6 +22,7 @@ func TestStaticDashboardContracts(t *testing.T) {
 		"FLOW",
 		"Codex Router",
 		"flowwweb-icon.png",
+		"flow-wordmark.png",
 		"settings-dialog",
 		"login-dialog",
 		"Cancel sign-in",
@@ -39,12 +40,15 @@ func TestStaticDashboardContracts(t *testing.T) {
 	if _, contentType, ok := Asset("flowwweb-icon.png"); !ok || contentType != "image/png" {
 		t.Fatalf("Flowwweb icon asset is unavailable: ok=%v type=%q", ok, contentType)
 	}
+	if _, contentType, ok := Asset("flow-wordmark.png"); !ok || contentType != "image/png" {
+		t.Fatalf("FLOW wordmark asset is unavailable: ok=%v type=%q", ok, contentType)
+	}
 	for _, removed := range []string{"Subscription Router", "Your ChatGPT subscriptions", "subscriptions connected", "flowwweb-mark.svg"} {
 		if strings.Contains(html+js, removed) {
 			t.Errorf("dashboard retained non-essential copy %q", removed)
 		}
 	}
-	for _, contract := range []string{"min-width: 0", "min-height: 44px", "min(calc(100% - 1.5rem), 46rem)", ".dialog:focus { outline: none; }", ".toast.success", ".toast.error", ".dialog-toast-region", ".login-opening", ".skeleton-line", "@keyframes shimmer", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
+	for _, contract := range []string{"min-width: 0", "min-height: 44px", "min(calc(100% - 1.5rem), 46rem)", ".brand-wordmark", ".dialog:focus { outline: none; }", ".toast.success", ".toast.error", ".dialog-toast-region", ".login-opening", ".skeleton-line", "@keyframes shimmer", "prefers-reduced-motion", "forced-colors: active", ":focus-visible"} {
 		if !strings.Contains(css, contract) {
 			t.Errorf("CSS is missing %q", contract)
 		}

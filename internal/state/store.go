@@ -26,6 +26,8 @@ type Account struct {
 	Enabled            bool   `json:"enabled"`
 	Controller         bool   `json:"controller"`
 	LastKnownConnected bool   `json:"lastKnownConnected,omitempty"`
+	LastKnownEmail     string `json:"lastKnownEmail,omitempty"`
+	LastKnownPlanType  string `json:"lastKnownPlanType,omitempty"`
 	CreatedAt          int64  `json:"createdAt"`
 }
 
@@ -36,8 +38,9 @@ type persistedState struct {
 	AccountCreateKeys map[string]string `json:"accountCreateKeys,omitempty"`
 }
 
-// Store persists only routing metadata. OAuth credentials and conversation
-// databases remain inside each account's isolated Codex home.
+// Store persists routing metadata and non-secret account identity metadata.
+// OAuth credentials and conversation databases remain inside each account's
+// isolated Codex home.
 type Store struct {
 	mu               sync.RWMutex
 	root             string
@@ -349,6 +352,23 @@ func (s *Store) SetAccountConnected(id string, connected bool) error {
 			return nil
 		}
 		s.accounts[index].LastKnownConnected = connected
+		return s.saveLocked()
+	}
+	return fmt.Errorf("account %q not found", id)
+}
+
+func (s *Store) SetAccountIdentity(id, email, planType string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.accounts {
+		if s.accounts[index].ID != id {
+			continue
+		}
+		if s.accounts[index].LastKnownEmail == email && s.accounts[index].LastKnownPlanType == planType {
+			return nil
+		}
+		s.accounts[index].LastKnownEmail = email
+		s.accounts[index].LastKnownPlanType = planType
 		return s.saveLocked()
 	}
 	return fmt.Errorf("account %q not found", id)

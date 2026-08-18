@@ -2,6 +2,7 @@ package mux
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/b-nnett/codex-subscription-router/internal/state"
@@ -30,7 +32,42 @@ type authFile struct {
 	Tokens struct {
 		AccessToken string `json:"access_token"`
 		AccountID   string `json:"account_id"`
+		IDToken     string `json:"id_token"`
 	} `json:"tokens"`
+}
+
+func authEmail(credentials authFile) string {
+	parts := strings.Split(credentials.Tokens.IDToken, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		payload, err = base64.URLEncoding.DecodeString(parts[1])
+	}
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Email string `json:"email"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return ""
+	}
+	return strings.TrimSpace(claims.Email)
+}
+
+func accountEmailFromAuth(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	var credentials authFile
+	if json.NewDecoder(io.LimitReader(file, profileMaxBytes)).Decode(&credentials) != nil {
+		return ""
+	}
+	return authEmail(credentials)
 }
 
 type profileResponse struct {
