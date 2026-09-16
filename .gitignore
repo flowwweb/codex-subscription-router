@@ -18,6 +18,7 @@ state.json
 
 # Signing and local credentials must never enter source control.
 !.env.example
+!.env.*.example
 *.cer
 *.key
 *.mobileprovision
